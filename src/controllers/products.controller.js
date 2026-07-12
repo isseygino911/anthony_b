@@ -1,0 +1,73 @@
+const productService = require('../services/product.service');
+const uploadService = require('../services/upload.service');
+const asyncHandler = require('../utils/asyncHandler');
+const ApiError = require('../utils/apiError');
+
+const isAdminReq = (req) => Boolean(req.user && req.user.role === 'admin');
+
+const listProducts = asyncHandler(async (req, res) => {
+  const result = await productService.listProducts(req.query, { isAdmin: isAdminReq(req) });
+  res.status(200).json(result);
+});
+
+const getProduct = asyncHandler(async (req, res) => {
+  const product = await productService.getProductDetail(Number(req.params.id), {
+    isAdmin: isAdminReq(req),
+  });
+  res.status(200).json(product);
+});
+
+const createProduct = asyncHandler(async (req, res) => {
+  const product = await productService.createProduct(req.body);
+  res.status(201).json(product);
+});
+
+const updateProduct = asyncHandler(async (req, res) => {
+  const product = await productService.updateProduct(Number(req.params.id), req.body);
+  res.status(200).json(product);
+});
+
+const deleteProduct = asyncHandler(async (req, res) => {
+  await productService.softDeleteProduct(Number(req.params.id));
+  res.status(204).end();
+});
+
+const bulkDeleteProducts = asyncHandler(async (req, res) => {
+  const { ids } = req.body;
+  const softDeleted = await productService.bulkSoftDelete(ids);
+  res.status(200).json({ softDeleted });
+});
+
+const uploadProductImages = asyncHandler(async (req, res) => {
+  if (!req.files || !req.files.length) throw ApiError.badRequest('No files uploaded');
+  const images = await uploadService.uploadProductImages(Number(req.params.id), req.files);
+  res.status(201).json({ images });
+});
+
+const setPrimaryImage = asyncHandler(async (req, res) => {
+  const image = await uploadService.setPrimaryImage(Number(req.params.id), Number(req.params.imageId));
+  res.status(200).json(image);
+});
+
+const deleteProductImage = asyncHandler(async (req, res) => {
+  await uploadService.deleteProductImage(Number(req.params.id), Number(req.params.imageId));
+  res.status(204).end();
+});
+
+const setProductGroups = asyncHandler(async (req, res) => {
+  const groupIds = await productService.setGroupsForProduct(Number(req.params.id), req.body.groupIds);
+  res.status(200).json({ groupIds });
+});
+
+module.exports = {
+  listProducts,
+  getProduct,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  bulkDeleteProducts,
+  uploadProductImages,
+  setPrimaryImage,
+  deleteProductImage,
+  setProductGroups,
+};

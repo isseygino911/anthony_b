@@ -1,0 +1,35 @@
+{
+  "name": "anthony-ecom-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Express MVC API server for the white-label e-commerce template (docs/architecture.md). Standalone repo — paired with a separate frontend repo, not an npm workspace.",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "migrate": "knex --knexfile migrations/knexfile.js migrate:latest",
+    "migrate:rollback": "knex --knexfile migrations/knexfile.js migrate:rollback",
+    "seed": "knex --knexfile migrations/knexfile.js seed:run",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "bcrypt": "^5.1.1",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.3.1",
+    "google-auth-library": "^9.11.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "knex": "^3.1.0",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.11.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "better-sqlite3": "^12.11.1",
+    "nodemon": "^3.1.4",
+    "vitest": "^4.1.10"
+  }
+}

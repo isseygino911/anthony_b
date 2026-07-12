@@ -1,0 +1,27 @@
+# Caddy config for anthony_ecom.
+#
+# Replace `:80` below with your real domain (e.g. `shop.example.com`) once
+# the Hostinger VPS + DNS are provisioned — Caddy will then handle TLS
+# (Let's Encrypt) automatically. `:80` is a placeholder for local/plain-HTTP
+# testing of this config only; this file does not deploy or provision
+# anything by itself.
+#
+# client/ and server/ are now two independent repos, deployed as sibling
+# checkouts on the VPS (not nested), e.g.:
+#   /var/www/anthony-ecom-server/   (this repo)
+#   /var/www/anthony-ecom-client/   (frontend repo, built via `npm run build`)
+# Adjust the `root *` path below to match wherever the client repo's `dist/`
+# actually lands on the target server — this placeholder assumes the sibling
+# layout above.
+
+:80 {
+	# API traffic goes to the Express server (PM2-managed, ecosystem.config.js).
+	reverse_proxy /api/* localhost:4000
+
+	# Everything else is the static Vite build, with SPA fallback so
+	# client-side routes (react-router-dom) resolve to index.html.
+	root * /var/www/anthony-ecom-client/dist
+	encode gzip
+	try_files {path} /index.html
+	file_server
+}
