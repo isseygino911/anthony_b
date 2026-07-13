@@ -22,23 +22,30 @@ function parseTags(tags) {
 function shapeProduct(product, { isAdmin, images, primaryImageUrl, groupIds } = {}) {
   const base = {
     id: product.id,
-    categoryId: product.category_id,
+    category_id: product.category_id,
     name: product.name,
     description: product.description,
     price: Number(product.price),
     sku: product.sku,
     tags: parseTags(product.tags),
-    isFeatured: Boolean(product.is_featured),
-    isBestseller: Boolean(product.is_bestseller),
-    isClearance: Boolean(product.is_clearance),
+    is_featured: Boolean(product.is_featured),
+    is_bestseller: Boolean(product.is_bestseller),
+    is_clearance: Boolean(product.is_clearance),
     stockStatus: stockStatus(product),
   };
   if (isAdmin) {
-    base.stockQuantity = product.stock_quantity;
-    base.lowStockThreshold = product.low_stock_threshold;
+    base.stock_quantity = product.stock_quantity;
+    base.low_stock_threshold = product.low_stock_threshold;
   }
-  if (images) base.images = images;
-  if (primaryImageUrl !== undefined) base.imageUrl = primaryImageUrl;
+  if (images) {
+    base.images = images;
+  } else if (primaryImageUrl !== undefined) {
+    // List/summary responses only ever fetch the primary image (perf: avoids
+    // an N+1 join for every row) — wrap it as a one-element images[] so the
+    // client's single `Product.images` contract holds for both list and
+    // detail responses instead of exposing a second, list-only field shape.
+    base.images = primaryImageUrl ? [{ id: 0, url: primaryImageUrl, is_primary: true, sort_order: 0 }] : [];
+  }
   if (groupIds) base.groupIds = groupIds;
   return base;
 }
