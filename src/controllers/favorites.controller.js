@@ -4,8 +4,10 @@ const asyncHandler = require('../utils/asyncHandler');
 
 const listFavorites = asyncHandler(async (req, res) => {
   const rows = await favoriteModel.listForUser(req.user.id);
-  const items = rows.map((row) =>
-    productService.shapeProduct(row, { isAdmin: false, primaryImageUrl: row.primary_image_url })
+  const items = await Promise.all(
+    rows.map((row) =>
+      productService.shapeProduct(row, { isAdmin: false, primaryImageUrl: row.primary_image_url })
+    )
   );
   res.status(200).json({ items });
 });

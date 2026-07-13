@@ -5,6 +5,7 @@ const categoryModel = require('../models/category.model');
 const productGroupItemModel = require('../models/productGroupItem.model');
 const ApiError = require('../utils/apiError');
 const { resolveLowStockThreshold } = require('../utils/stockThreshold');
+const { signImageUrl } = require('../utils/signedImageUrl');
 
 function stockStatus(product) {
   if (product.stock_quantity <= 0) return 'out_of_stock';
@@ -19,7 +20,7 @@ function parseTags(tags) {
 
 // Customer-facing responses never include exact stock_quantity (plan §9.1) —
 // only admins see the real number.
-function shapeProduct(product, { isAdmin, images, primaryImageUrl, groupIds } = {}) {
+async function shapeProduct(product, { isAdmin, images, primaryImageUrl, groupIds } = {}) {
   const base = {
     id: product.id,
     category_id: product.category_id,
@@ -38,13 +39,15 @@ function shapeProduct(product, { isAdmin, images, primaryImageUrl, groupIds } = 
     base.low_stock_threshold = product.low_stock_threshold;
   }
   if (images) {
-    base.images = images;
+    base.images = await Promise.all(images.map(async (img) => ({ ...img, url: await signImageUrl(img.url) })));
   } else if (primaryImageUrl !== undefined) {
     // List/summary responses only ever fetch the primary image (perf: avoids
     // an N+1 join for every row) — wrap it as a one-element images[] so the
     // client's single `Product.images` contract holds for both list and
     // detail responses instead of exposing a second, list-only field shape.
-    base.images = primaryImageUrl ? [{ id: 0, url: primaryImageUrl, is_primary: true, sort_order: 0 }] : [];
+    base.images = primaryImageUrl
+      ? [{ id: 0, url: await signImageUrl(primaryImageUrl), is_primary: true, sort_order: 0 }]
+      : [];
   }
   if (groupIds) base.groupIds = groupIds;
   return base;
@@ -74,7 +77,7 @@ async function listProducts(query, { isAdmin }) {
   ]);
 
   return {
-    items: rows.map((row) => shapeProduct(row, { isAdmin, primaryImageUrl: row.primary_image_url })),
+    items: await Promise.all(rows.map((row) => shapeProduct(row, { isAdmin, primaryImageUrl: row.primary_image_url }))),
     total,
     page,
     pageSize,

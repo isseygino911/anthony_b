@@ -2,6 +2,7 @@ const productService = require('../services/product.service');
 const uploadService = require('../services/upload.service');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
+const { signImageUrl } = require('../utils/signedImageUrl');
 
 const isAdminReq = (req) => Boolean(req.user && req.user.role === 'admin');
 
@@ -41,12 +42,13 @@ const bulkDeleteProducts = asyncHandler(async (req, res) => {
 const uploadProductImages = asyncHandler(async (req, res) => {
   if (!req.files || !req.files.length) throw ApiError.badRequest('No files uploaded');
   const images = await uploadService.uploadProductImages(Number(req.params.id), req.files);
-  res.status(201).json({ images });
+  const signed = await Promise.all(images.map(async (img) => ({ ...img, url: await signImageUrl(img.url) })));
+  res.status(201).json({ images: signed });
 });
 
 const setPrimaryImage = asyncHandler(async (req, res) => {
   const image = await uploadService.setPrimaryImage(Number(req.params.id), Number(req.params.imageId));
-  res.status(200).json(image);
+  res.status(200).json({ ...image, url: await signImageUrl(image.url) });
 });
 
 const deleteProductImage = asyncHandler(async (req, res) => {

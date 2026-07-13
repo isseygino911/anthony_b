@@ -16,11 +16,11 @@ function findUserRows(userId, trx) {
   return trx(TABLE).where({ user_id: userId });
 }
 
-function updateQuantity(cartId, quantity, trx) {
+function updateQuantity(cartId, quantity, trx = db) {
   return trx(TABLE).where({ cart_id: cartId }).update({ quantity });
 }
 
-function deleteRow(cartId, trx) {
+function deleteRow(cartId, trx = db) {
   return trx(TABLE).where({ cart_id: cartId }).del();
 }
 

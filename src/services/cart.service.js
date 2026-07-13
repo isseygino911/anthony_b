@@ -2,6 +2,7 @@ const db = require('../config/db');
 const cartModel = require('../models/cart.model');
 const productModel = require('../models/product.model');
 const ApiError = require('../utils/apiError');
+const { signImageUrl } = require('../utils/signedImageUrl');
 
 // architecture.md §6 — cart merge-on-login algorithm, verbatim. Called from
 // auth.service.js on register/login/OAuth callback, never reimplemented per
@@ -40,14 +41,16 @@ function toIdentity({ user, anonSessionId }) {
   throw ApiError.badRequest('No cart identity available');
 }
 
-function shapeCart(rows) {
-  const items = rows.map((row) => ({
-    productId: row.product_id,
-    name: row.name,
-    price: Number(row.price),
-    quantity: row.quantity,
-    imageUrl: row.image_url || null,
-  }));
+async function shapeCart(rows) {
+  const items = await Promise.all(
+    rows.map(async (row) => ({
+      productId: row.product_id,
+      name: row.name,
+      price: Number(row.price),
+      quantity: row.quantity,
+      imageUrl: await signImageUrl(row.image_url || null),
+    })),
+  );
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   return { items, subtotal: Number(subtotal.toFixed(2)) };
 }

@@ -1,6 +1,7 @@
 const siteThemeModel = require('../models/siteTheme.model');
 const { PALETTES, PALETTE_IDS } = require('../config/palettes');
 const ApiError = require('../utils/apiError');
+const { signImageUrl } = require('../utils/signedImageUrl');
 
 // architecture.md §5.1 — resolves palette_id/custom_colors -> {primary, secondary}.
 function resolveColors(themeRow) {
@@ -24,7 +25,7 @@ async function getTheme() {
   return {
     brand_name: row.brand_name,
     tagline: row.tagline,
-    logo_url: row.logo_url,
+    logo_url: await signImageUrl(row.logo_url),
     palette_id: row.palette_id,
     custom_colors: themeRow.custom_colors,
     resolvedColors: resolveColors(themeRow),
@@ -53,7 +54,12 @@ async function updateTheme(data) {
   const patch = {};
   if (data.brand_name !== undefined) patch.brand_name = data.brand_name;
   if (data.tagline !== undefined) patch.tagline = data.tagline;
-  if (data.logo_url !== undefined) patch.logo_url = data.logo_url;
+  // getTheme() returns logo_url as a presigned URL (bucket has Block Public
+  // Access on — see signedImageUrl.js), and the admin UI round-trips that
+  // same value back through save when the logo isn't being changed. Strip
+  // any query string so the DB always stores the canonical, un-signed form —
+  // never a temporary, eventually-expiring presigned one.
+  if (data.logo_url !== undefined) patch.logo_url = data.logo_url ? data.logo_url.split('?')[0] : data.logo_url;
   if (data.palette_id !== undefined) patch.palette_id = data.palette_id;
   if (data.custom_colors !== undefined) {
     patch.custom_colors = data.custom_colors ? JSON.stringify(data.custom_colors) : null;

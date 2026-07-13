@@ -27,7 +27,9 @@ const listGroupProducts = asyncHandler(async (req, res) => {
 
   const isAdmin = isAdminReq(req);
   res.status(200).json({
-    items: rows.map((row) => productService.shapeProduct(row, { isAdmin, primaryImageUrl: row.primary_image_url })),
+    items: await Promise.all(
+      rows.map((row) => productService.shapeProduct(row, { isAdmin, primaryImageUrl: row.primary_image_url })),
+    ),
     total,
   });
 });
