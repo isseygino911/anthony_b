@@ -18,5 +18,17 @@ router.post(
 );
 router.put('/admin/documents/:id', requireAuth, requireAdmin, documentsController.updateDocument);
 router.delete('/admin/documents/:id', requireAuth, requireAdmin, documentsController.deleteDocument);
+router.post(
+  '/admin/documents/reindex-all',
+  requireAuth,
+  requireAdmin,
+  documentsController.reindexAllDocuments
+);
+router.post(
+  '/admin/documents/:id/reindex',
+  requireAuth,
+  requireAdmin,
+  documentsController.reindexDocument
+);
 
 module.exports = router;

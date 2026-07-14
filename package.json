@@ -15,6 +15,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/s3-request-presigner": "^3.1086.0",
+    "@google/genai": "^2.11.0",
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.6",
     "dotenv": "^16.4.5",
@@ -26,6 +27,7 @@
     "knex": "^3.1.0",
     "multer": "^1.4.5-lts.1",
     "mysql2": "^3.11.0",
+    "pdf-parse": "^1.1.1",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

@@ -1,4 +1,6 @@
 const documentService = require('../services/document.service');
+const documentIndexingService = require('../services/documentIndexing.service');
+const documentModel = require('../models/document.model');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
 
@@ -33,10 +35,30 @@ const deleteDocument = asyncHandler(async (req, res) => {
   res.status(204).end();
 });
 
+const reindexDocument = asyncHandler(async (req, res) => {
+  const chunks = await documentIndexingService.indexDocument(Number(req.params.id));
+  res.status(200).json({ chunksIndexed: chunks.length });
+});
+
+const reindexAllDocuments = asyncHandler(async (req, res) => {
+  const documents = await documentModel.listAll();
+  let totalChunks = 0;
+  // Sequential, not parallel — avoids hammering the Gemini API.
+  // eslint-disable-next-line no-restricted-syntax
+  for (const document of documents) {
+    // eslint-disable-next-line no-await-in-loop
+    const chunks = await documentIndexingService.indexDocument(document.id);
+    totalChunks += chunks.length;
+  }
+  res.status(200).json({ documentsIndexed: documents.length, totalChunks });
+});
+
 module.exports = {
   listDocuments,
   getDocument,
   createDocument,
   updateDocument,
   deleteDocument,
+  reindexDocument,
+  reindexAllDocuments,
 };

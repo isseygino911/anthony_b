@@ -3,9 +3,20 @@ const productModel = require('../models/product.model');
 const productImageModel = require('../models/productImage.model');
 const categoryModel = require('../models/category.model');
 const productGroupItemModel = require('../models/productGroupItem.model');
+const productEmbeddingSyncService = require('./productEmbeddingSync.service');
 const ApiError = require('../utils/apiError');
 const { resolveLowStockThreshold } = require('../utils/stockThreshold');
 const { signImageUrl } = require('../utils/signedImageUrl');
+const { isConfigured: geminiIsConfigured } = require('../config/gemini');
+
+// Fire-and-forget: embedding sync must never block or fail a product save.
+// No-ops silently if GEMINI_API_KEY isn't set yet (expected until configured).
+function syncEmbeddingNonFatal(product) {
+  if (!geminiIsConfigured) return;
+  productEmbeddingSyncService.syncProduct(product).catch((err) => {
+    console.error(`[product.service] syncProduct(${product.id}) failed`, err);
+  });
+}
 
 function stockStatus(product) {
   if (product.stock_quantity <= 0) return 'out_of_stock';
@@ -94,6 +105,7 @@ async function getProductDetail(id, { isAdmin }) {
 
 async function createProduct(data) {
   const product = await productModel.insertProduct(data);
+  syncEmbeddingNonFatal(product);
   return shapeProduct(product, { isAdmin: true, images: [] });
 }
 
@@ -101,6 +113,7 @@ async function updateProduct(id, data) {
   const existing = await productModel.findById(id);
   if (!existing) throw ApiError.notFound('Product not found');
   const product = await productModel.updateProduct(id, data);
+  syncEmbeddingNonFatal(product);
   const images = await productImageModel.listByProductId(id);
   return shapeProduct(product, { isAdmin: true, images });
 }

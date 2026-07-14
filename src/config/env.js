@@ -42,6 +42,12 @@ const config = {
     bucket: required('S3_BUCKET_NAME'),
   },
 
+  gemini: {
+    apiKey: required('GEMINI_API_KEY'),
+    embeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001',
+    chatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash',
+  },
+
   cookieDomain: process.env.COOKIE_DOMAIN || 'localhost',
   clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   csrfSecret: process.env.CSRF_SECRET,

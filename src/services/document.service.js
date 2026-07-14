@@ -1,7 +1,18 @@
 const documentModel = require('../models/document.model');
 const uploadService = require('../services/upload.service');
+const documentIndexingService = require('./documentIndexing.service');
 const ApiError = require('../utils/apiError');
 const { signImageUrl } = require('../utils/signedImageUrl');
+const { isConfigured: geminiIsConfigured } = require('../config/gemini');
+
+// Fire-and-forget: indexing must never block or fail a document upload/save.
+// No-ops silently if GEMINI_API_KEY isn't set yet (expected until configured).
+function reindexNonFatal(id) {
+  if (!geminiIsConfigured) return;
+  documentIndexingService.indexDocument(id).catch((err) => {
+    console.error(`[document.service] indexDocument(${id}) failed`, err);
+  });
+}
 
 function shapeDocument(row) {
   return {
@@ -30,6 +41,7 @@ async function getDocument(id) {
 async function createDocument({ title, category, file }) {
   const url = await uploadService.uploadDocumentFile(file, category);
   const row = await documentModel.insertDocument({ title, category, url });
+  reindexNonFatal(row.id);
   return shapeDocumentWithUrl(row);
 }
 
@@ -37,6 +49,7 @@ async function updateDocument(id, data) {
   const existing = await documentModel.findById(id);
   if (!existing) throw ApiError.notFound('Document not found');
   const row = await documentModel.updateDocument(id, data);
+  reindexNonFatal(id);
   return shapeDocumentWithUrl(row);
 }
 

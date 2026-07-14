@@ -26,4 +26,14 @@ const orderLimiter = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'Too many order attempts, try again later' } },
 });
 
-module.exports = { generalLimiter, loginLimiter, orderLimiter };
+// Stricter limiter for the Gemini assistant — off-topic-gate is the primary
+// cost control, this is the abuse-volume backstop (Stage 2 plan).
+const assistantLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 25,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many assistant messages, try again later' } },
+});
+
+module.exports = { generalLimiter, loginLimiter, orderLimiter, assistantLimiter };
