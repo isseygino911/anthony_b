@@ -84,4 +84,21 @@ async function uploadLogo(file) {
   return putFile(file, 'branding');
 }
 
-module.exports = { uploadProductImages, setPrimaryImage, deleteProductImage, uploadLogo };
+// POST /api/admin/documents
+async function uploadDocumentFile(file, category) {
+  return putFile(file, `pdf/${category || 'other'}`);
+}
+
+// DELETE /api/admin/documents/:id
+async function deleteDocumentFile(url) {
+  return deleteObjectByUrl(url);
+}
+
+module.exports = {
+  uploadProductImages,
+  setPrimaryImage,
+  deleteProductImage,
+  uploadLogo,
+  uploadDocumentFile,
+  deleteDocumentFile,
+};
