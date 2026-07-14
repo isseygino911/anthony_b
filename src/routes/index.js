@@ -13,6 +13,7 @@ const themeRoutes = require('./theme.routes');
 const notificationsRoutes = require('./notifications.routes');
 const dashboardRoutes = require('./dashboard.routes');
 const assistantRoutes = require('./assistant.routes');
+const adminAnalyticsRoutes = require('./adminAnalytics.routes');
 
 const router = express.Router();
 
@@ -29,5 +30,6 @@ router.use(themeRoutes);
 router.use(notificationsRoutes);
 router.use(dashboardRoutes);
 router.use(assistantRoutes);
+router.use(adminAnalyticsRoutes);
 
 module.exports = router;

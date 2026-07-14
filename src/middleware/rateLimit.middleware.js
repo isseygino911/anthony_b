@@ -36,4 +36,14 @@ const assistantLimiter = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'Too many assistant messages, try again later' } },
 });
 
-module.exports = { generalLimiter, loginLimiter, orderLimiter, assistantLimiter };
+// Stricter limiter for the admin AI Insights agent — same abuse-volume
+// backstop rationale as assistantLimiter, scoped to admins only.
+const adminAgentLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many analytics queries, try again later' } },
+});
+
+module.exports = { generalLimiter, loginLimiter, orderLimiter, assistantLimiter, adminAgentLimiter };

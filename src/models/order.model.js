@@ -106,4 +106,5 @@ module.exports = {
   listAdmin,
   countAdmin,
   getRevenueSeries,
+  REVENUE_EXCLUDED_STATUSES,
 };
