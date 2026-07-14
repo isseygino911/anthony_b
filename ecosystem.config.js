@@ -24,5 +24,23 @@ module.exports = {
         NODE_ENV: 'production',
       },
     },
+    {
+      // Polls product_seo for products queued by product.service.js and
+      // invokes the seo-geo-agent subagent via the Claude Code CLI — see
+      // scripts/seo-geo-worker.js. Requires the `claude` CLI installed and
+      // authenticated for the OS user PM2 runs as on this box.
+      name: 'anthony-ecom-seo-worker',
+      script: './scripts/seo-geo-worker.js',
+      cwd: __dirname,
+      instances: 1,
+      exec_mode: 'fork',
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 3000,
+      env: {
+        NODE_ENV: 'production',
+      },
+    },
   ],
 };

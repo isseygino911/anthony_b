@@ -1,8 +1,32 @@
 const productService = require('../services/product.service');
 const uploadService = require('../services/upload.service');
+const productSeoModel = require('../models/productSeo.model');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
 const { signImageUrl } = require('../utils/signedImageUrl');
+
+// product_seo's JSON columns come back auto-parsed on MySQL but as strings
+// on sqlite (tests) — mirrors product.service.js's parseTags() handling.
+function parseJsonColumn(value) {
+  if (value == null) return null;
+  return typeof value === 'string' ? JSON.parse(value) : value;
+}
+
+function shapeProductSeo(row) {
+  if (!row) return null;
+  return {
+    productId: row.product_id,
+    status: row.status,
+    attempts: row.attempts,
+    seo: parseJsonColumn(row.seo),
+    geo: parseJsonColumn(row.geo),
+    schemaMarkup: parseJsonColumn(row.schema_markup),
+    audit: parseJsonColumn(row.audit),
+    flags: parseJsonColumn(row.flags) ?? [],
+    lastError: row.last_error,
+    updatedAt: row.updated_at,
+  };
+}
 
 const isAdminReq = (req) => Boolean(req.user && req.user.role === 'admin');
 
@@ -61,6 +85,12 @@ const setProductGroups = asyncHandler(async (req, res) => {
   res.status(200).json({ groupIds });
 });
 
+const getProductSeo = asyncHandler(async (req, res) => {
+  const row = await productSeoModel.findByProductId(Number(req.params.id));
+  if (!row) throw ApiError.notFound('No SEO/GEO data for this product yet');
+  res.status(200).json(shapeProductSeo(row));
+});
+
 module.exports = {
   listProducts,
   getProduct,
@@ -72,4 +102,5 @@ module.exports = {
   setPrimaryImage,
   deleteProductImage,
   setProductGroups,
+  getProductSeo,
 };

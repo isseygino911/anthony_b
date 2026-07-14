@@ -32,5 +32,6 @@ router.delete(
   requireAdmin,
   productsController.deleteProductImage
 );
+router.get('/admin/products/:id/seo', requireAuth, requireAdmin, productsController.getProductSeo);
 
 module.exports = router;

@@ -4,6 +4,7 @@ const productImageModel = require('../models/productImage.model');
 const categoryModel = require('../models/category.model');
 const productGroupItemModel = require('../models/productGroupItem.model');
 const productEmbeddingSyncService = require('./productEmbeddingSync.service');
+const productSeoSyncService = require('./productSeoSync.service');
 const ApiError = require('../utils/apiError');
 const { resolveLowStockThreshold } = require('../utils/stockThreshold');
 const { signImageUrl } = require('../utils/signedImageUrl');
@@ -15,6 +16,15 @@ function syncEmbeddingNonFatal(product) {
   if (!geminiIsConfigured) return;
   productEmbeddingSyncService.syncProduct(product).catch((err) => {
     console.error(`[product.service] syncProduct(${product.id}) failed`, err);
+  });
+}
+
+// Fire-and-forget: this only enqueues a 'pending' row (a fast DB write) —
+// scripts/seo-geo-worker.js does the actual LLM call out-of-process, so a
+// product save is never blocked on it.
+function syncSeoNonFatal(product) {
+  productSeoSyncService.enqueueProduct(product).catch((err) => {
+    console.error(`[product.service] enqueueProduct(${product.id}) failed`, err);
   });
 }
 
@@ -106,6 +116,7 @@ async function getProductDetail(id, { isAdmin }) {
 async function createProduct(data) {
   const product = await productModel.insertProduct(data);
   syncEmbeddingNonFatal(product);
+  syncSeoNonFatal(product);
   return shapeProduct(product, { isAdmin: true, images: [] });
 }
 
@@ -114,6 +125,7 @@ async function updateProduct(id, data) {
   if (!existing) throw ApiError.notFound('Product not found');
   const product = await productModel.updateProduct(id, data);
   syncEmbeddingNonFatal(product);
+  syncSeoNonFatal(product);
   const images = await productImageModel.listByProductId(id);
   return shapeProduct(product, { isAdmin: true, images });
 }

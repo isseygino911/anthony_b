@@ -10,6 +10,7 @@
     "migrate": "knex --knexfile migrations/knexfile.js migrate:latest",
     "migrate:rollback": "knex --knexfile migrations/knexfile.js migrate:rollback",
     "seed": "knex --knexfile migrations/knexfile.js seed:run",
+    "seo-worker": "node scripts/seo-geo-worker.js",
     "test": "vitest run"
   },
   "dependencies": {
