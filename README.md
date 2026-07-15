@@ -50,6 +50,49 @@ Starts the Express API on `http://localhost:4002` (via nodemon). Pair it
 with the separate frontend repo's `npm run dev` (Vite, default
 `http://localhost:5173`), which proxies `/api/*` here.
 
+## Running via Docker (production)
+
+The main Express server is Docker-managed (see `Dockerfile` /
+`docker-compose.yml`); the seo-worker (`scripts/seo-geo-worker.js`) is not
+containerized and keeps running on PM2 — see "PM2 to Docker cutover" below.
+
+```bash
+# Build the image and start the container (reads server/.env at run time
+# via env_file — the real .env is never baked into the image)
+docker compose up -d --build
+
+# Tail logs
+docker compose logs -f server
+
+# Stop and remove the container
+docker compose down
+```
+
+On container start, `docker-entrypoint.sh` runs `knex migrate:latest`
+against the configured `DB_*` host (the remote Hostinger MySQL instance)
+before starting the server. Set `RUN_MIGRATIONS=false` in `.env` to skip
+this on a given run (e.g. if migrations were already applied).
+
+### PM2 to Docker cutover (main server only)
+
+The main server previously ran under PM2 as `anthony-ecom-server`. That app
+block has been removed from `ecosystem.config.js` — the main server is now
+Docker-managed. One-time cutover on the VPS:
+
+```bash
+pm2 stop anthony-ecom-server
+docker compose up -d --build
+# once confirmed healthy:
+pm2 delete anthony-ecom-server
+pm2 save
+```
+
+The `anthony-ecom-seo-worker` PM2 process is unaffected and keeps running
+as-is — it shells out to an authenticated `claude` CLI subprocess, which is
+a separate containerization problem left for later. Caddy needs no changes
+either way: it already reverse-proxies `localhost:4002` regardless of
+whether that port is served by the bare PM2 process or the container.
+
 ## Running migrations/seeds
 
 ```bash
@@ -99,12 +142,17 @@ Never commit the real `.env` file.
 
 ## Deploy shape (conceptual — not provisioned)
 
-- `ecosystem.config.js` — PM2 process definition for this Express server
-  (`src/server.js` as entrypoint).
-- `Caddyfile` — reverse proxy config: routes `/api/*` to the PM2-managed
-  Express process, serves the frontend repo's static build for everything
-  else with SPA fallback to `index.html`. Assumes this repo and the frontend
-  repo are deployed as sibling checkouts on the VPS — see the comment at the
-  top of `Caddyfile` for the exact assumed layout and adjust as needed.
+- `Dockerfile` / `docker-compose.yml` / `docker-entrypoint.sh` — container
+  definition for the main Express server (`src/server.js` as entrypoint).
+  See "Running via Docker (production)" above.
+- `ecosystem.config.js` — PM2 process definition for the seo-worker
+  (`scripts/seo-geo-worker.js`) only. The main server is no longer defined
+  here; it's Docker-managed.
+- `Caddyfile` — reverse proxy config: routes `/api/*` to the Express process
+  on `localhost:4002` (container or bare process, Caddy doesn't care which),
+  serves the frontend repo's static build for everything else with SPA
+  fallback to `index.html`. Assumes this repo and the frontend repo are
+  deployed as sibling checkouts on the VPS — see the comment at the top of
+  `Caddyfile` for the exact assumed layout and adjust as needed.
 
 Actual VPS provisioning, domain/DNS, and TLS setup are not done by this repo.

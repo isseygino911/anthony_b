@@ -1,0 +1,12 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: anthony-ecom-server:latest
+    container_name: anthony-ecom-server
+    env_file:
+      - .env
+    ports:
+      - "4002:4002"
+    restart: unless-stopped
