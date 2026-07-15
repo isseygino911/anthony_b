@@ -5,7 +5,7 @@
 # points at this Hostinger VPS; no explicit TLS config needed here.
 #   - anthony.isseylab.com      the frontend (static Vite build)
 #   - anthony-api.isseylab.com  this backend API (Express, PM2-managed on
-#                                localhost:4000, ecosystem.config.js)
+#                                localhost:4002, ecosystem.config.js)
 # The frontend calls the API directly via its own absolute VITE_API_URL, so
 # the frontend site block no longer reverse-proxies anything itself.
 #
@@ -21,7 +21,7 @@ anthony-api.isseylab.com {
 	# Express (app.js) already mounts all routes under /api internally, and
 	# the client builds full /api/* paths into its absolute VITE_API_URL, so
 	# this domain has nothing else to serve — forward everything as-is.
-	reverse_proxy localhost:4000
+	reverse_proxy localhost:4002
 }
 
 anthony.isseylab.com {

@@ -46,7 +46,7 @@ The seed creates: 1 category, 3 demo products (with images), 1 default
 npm run dev
 ```
 
-Starts the Express API on `http://localhost:4000` (via nodemon). Pair it
+Starts the Express API on `http://localhost:4002` (via nodemon). Pair it
 with the separate frontend repo's `npm run dev` (Vite, default
 `http://localhost:5173`), which proxies `/api/*` here.
 
@@ -77,7 +77,7 @@ Never commit the real `.env` file.
 | Variable | Purpose |
 |---|---|
 | `NODE_ENV` | `development` / `production` — gates behavior like secure cookies |
-| `PORT` | Port the Express server listens on (default `4000`) |
+| `PORT` | Port the Express server listens on (default `4002`) |
 | `DB_HOST` | Remote MySQL host |
 | `DB_PORT` | Remote MySQL port |
 | `DB_USER` | Remote MySQL username |
