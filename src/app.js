@@ -1,6 +1,7 @@
 // Express app assembly: helmet, rate limiters, CSRF, routers.
 const express = require('express');
 const helmet = require('helmet');
+const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const { bucket, region } = require('./config/s3');
 const routes = require('./routes');
@@ -8,6 +9,7 @@ const { issueCsrfCookie, verifyCsrfToken } = require('./middleware/csrf.middlewa
 const { generalLimiter } = require('./middleware/rateLimit.middleware');
 const errorHandler = require('./middleware/errorHandler.middleware');
 const ApiError = require('./utils/apiError');
+const config = require('./config/env');
 
 const app = express();
 
@@ -24,6 +26,19 @@ app.use(
         'img-src': ["'self'", 'data:', ...s3ConnectSrc],
       },
     },
+  })
+);
+
+// Frontend and API are served from separate subdomains (architecture.md §3),
+// so cross-origin requests need CORS. credentials: true + an exact reflected
+// origin (never '*') because auth relies on cookies. X-CSRF-Token is a custom
+// header the CSRF double-submit-cookie flow (csrf.middleware.js) needs the
+// browser to be allowed to send cross-origin.
+app.use(
+  cors({
+    origin: config.clientOrigin,
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'X-CSRF-Token'],
   })
 );
 

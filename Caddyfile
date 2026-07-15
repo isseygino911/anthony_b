@@ -1,25 +1,32 @@
 # Caddy config for anthony_ecom.
 #
-# Replace `:80` below with your real domain (e.g. `shop.example.com`) once
-# the Hostinger VPS + DNS are provisioned — Caddy will then handle TLS
-# (Let's Encrypt) automatically. `:80` is a placeholder for local/plain-HTTP
-# testing of this config only; this file does not deploy or provision
-# anything by itself.
+# Two separate subdomains, each its own site block — Caddy handles TLS
+# (Let's Encrypt) automatically per-domain once DNS for both subdomains
+# points at this Hostinger VPS; no explicit TLS config needed here.
+#   - anthony.isseylab.com      the frontend (static Vite build)
+#   - anthony-api.isseylab.com  this backend API (Express, PM2-managed on
+#                                localhost:4000, ecosystem.config.js)
+# The frontend calls the API directly via its own absolute VITE_API_URL, so
+# the frontend site block no longer reverse-proxies anything itself.
 #
-# client/ and server/ are now two independent repos, deployed as sibling
+# client/ and server/ are two independent repos, deployed as sibling
 # checkouts on the VPS (not nested), e.g.:
 #   /var/www/anthony-ecom-server/   (this repo)
 #   /var/www/anthony-ecom-client/   (frontend repo, built via `npm run build`)
 # Adjust the `root *` path below to match wherever the client repo's `dist/`
-# actually lands on the target server — this placeholder assumes the sibling
-# layout above.
+# actually lands on the target server — this assumes the sibling layout
+# above.
 
-:80 {
-	# API traffic goes to the Express server (PM2-managed, ecosystem.config.js).
-	reverse_proxy /api/* localhost:4000
+anthony-api.isseylab.com {
+	# Express (app.js) already mounts all routes under /api internally, and
+	# the client builds full /api/* paths into its absolute VITE_API_URL, so
+	# this domain has nothing else to serve — forward everything as-is.
+	reverse_proxy localhost:4000
+}
 
-	# Everything else is the static Vite build, with SPA fallback so
-	# client-side routes (react-router-dom) resolve to index.html.
+anthony.isseylab.com {
+	# Static Vite build, with SPA fallback so client-side routes
+	# (react-router-dom) resolve to index.html.
 	root * /var/www/anthony-ecom-client/dist
 	encode gzip
 	try_files {path} /index.html
