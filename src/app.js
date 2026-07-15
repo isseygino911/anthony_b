@@ -13,6 +13,13 @@ const config = require('./config/env');
 
 const app = express();
 
+// Caddy is the one reverse-proxy hop in front of this app in every
+// deployment (Caddyfile), so it's the only source of X-Forwarded-For that
+// should be trusted. Without this, express-rate-limit throws
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on every request instead of correctly
+// identifying clients by their real IP.
+app.set('trust proxy', 1);
+
 const s3ConnectSrc = bucket ? [`https://${bucket}.s3.${region}.amazonaws.com`] : [];
 
 // architecture.md §9 — Helmet default config + CSP connect-src allowance for
