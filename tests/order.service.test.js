@@ -60,10 +60,10 @@ describe('order.service — total derivation (architecture.md §7.1)', () => {
     const order = await orderService.createOrder(1, { line1: '1 Main St', country: 'US' });
 
     expect(order.subtotal).toBeCloseTo(37.5); // 12.5 * 3
-    expect(order.adjustmentTotal).toBe(0);
+    expect(order.adjustment_total).toBe(0);
     expect(order.total).toBeCloseTo(37.5);
     expect(order.items).toHaveLength(1);
-    expect(order.items[0]).toMatchObject({ itemType: 'line', quantity: 3 });
+    expect(order.items[0]).toMatchObject({ item_type: 'line', quantity: 3 });
   });
 
   it('createOrder sums multiple line items into one subtotal', async () => {
@@ -97,7 +97,25 @@ describe('order.service — total derivation (architecture.md §7.1)', () => {
     );
 
     expect(updated.subtotal).toBeCloseTo(100); // line items untouched
-    expect(updated.adjustmentTotal).toBeCloseTo(-20);
+    expect(updated.adjustment_total).toBeCloseTo(-20);
+    expect(updated.total).toBeCloseTo(80); // subtotal + adjustment_total
+    expect(auditLogEntry).toMatchObject({ field_changed: 'total', new_value: '80' });
+  });
+
+  it('applyAdjustment (discount) normalizes a positive amount to negative, never increasing the total', async () => {
+    const productId = await seedProduct({ price: 100, stock_quantity: 10 });
+    await seedCartItem(13, productId, 1);
+    const order = await orderService.createOrder(13, { line1: 'x', country: 'US' });
+    expect(order.total).toBeCloseTo(100);
+
+    const { order: updated, auditLogEntry } = await orderService.applyAdjustment(
+      order.id,
+      { type: 'discount', amount: 20, reason: 'loyalty discount' },
+      /* actorUserId */ 99
+    );
+
+    expect(updated.subtotal).toBeCloseTo(100); // line items untouched
+    expect(updated.adjustment_total).toBeCloseTo(-20); // normalized to negative, not +20
     expect(updated.total).toBeCloseTo(80); // subtotal + adjustment_total
     expect(auditLogEntry).toMatchObject({ field_changed: 'total', new_value: '80' });
   });
@@ -114,7 +132,7 @@ describe('order.service — total derivation (architecture.md §7.1)', () => {
       1
     );
 
-    expect(afterSecond.adjustmentTotal).toBeCloseTo(5); // -10 + 15
+    expect(afterSecond.adjustment_total).toBeCloseTo(5); // -10 + 15
     expect(afterSecond.total).toBeCloseTo(105); // 100 + 5
   });
 

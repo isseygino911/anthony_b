@@ -35,20 +35,20 @@ async function shapeOrder(orderId, trx = db) {
       : order.shipping_address;
   return {
     id: order.id,
-    userId: order.user_id,
+    user_id: order.user_id,
     status: order.status,
-    shippingAddress,
+    shipping_address: shippingAddress,
     subtotal: Number(order.subtotal),
-    adjustmentTotal: Number(order.adjustment_total),
+    adjustment_total: Number(order.adjustment_total),
     total: Number(order.total),
-    createdAt: order.created_at,
-    updatedAt: order.updated_at,
+    created_at: order.created_at,
+    updated_at: order.updated_at,
     items: items.map((item) => ({
       id: item.id,
-      itemType: item.item_type,
-      productId: item.product_id,
+      item_type: item.item_type,
+      product_id: item.product_id,
       label: item.label,
-      unitPrice: item.unit_price !== null ? Number(item.unit_price) : null,
+      unit_price: item.unit_price !== null ? Number(item.unit_price) : null,
       quantity: item.quantity,
       amount: item.amount !== null ? Number(item.amount) : null,
     })),
@@ -115,9 +115,9 @@ async function listOrdersForUser(userId, { page, pageSize }) {
       id: row.id,
       status: row.status,
       subtotal: Number(row.subtotal),
-      adjustmentTotal: Number(row.adjustment_total),
+      adjustment_total: Number(row.adjustment_total),
       total: Number(row.total),
-      createdAt: row.created_at,
+      created_at: row.created_at,
     })),
     total: Number(countRow.count),
   };
@@ -135,11 +135,11 @@ async function listOrdersAdmin(filters, { page, pageSize }) {
       id: row.id,
       status: row.status,
       subtotal: Number(row.subtotal),
-      adjustmentTotal: Number(row.adjustment_total),
+      adjustment_total: Number(row.adjustment_total),
       total: Number(row.total),
-      createdAt: row.created_at,
-      customerName: row.customer_name,
-      customerEmail: row.customer_email,
+      created_at: row.created_at,
+      customer_name: row.customer_name,
+      customer_email: row.customer_email,
     })),
     total: Number(countRow.count),
   };
@@ -180,7 +180,8 @@ async function applyAdjustment(orderId, { type, amount, newStatus, reason }, act
       if (!label) throw ApiError.badRequest('Unknown adjustment type');
 
       const oldTotal = Number(order.total);
-      await orderItemModel.insertAdjustment(orderId, { label, amount }, trx);
+      const normalizedAmount = type === 'discount' ? -Math.abs(amount) : amount;
+      await orderItemModel.insertAdjustment(orderId, { label, amount: normalizedAmount }, trx);
       const totals = await recomputeAndStoreTotals(orderId, trx);
       await orderAuditLogModel.insertEntry(
         {
