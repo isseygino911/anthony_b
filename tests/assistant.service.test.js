@@ -76,6 +76,7 @@ async function resetSchema() {
     t.boolean('is_featured').defaultTo(false);
     t.boolean('is_bestseller').defaultTo(false);
     t.boolean('is_clearance').defaultTo(false);
+    t.boolean('is_active').defaultTo(true);
     t.datetime('deleted_at').nullable();
     t.datetime('created_at');
     t.datetime('updated_at');

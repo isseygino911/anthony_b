@@ -13,6 +13,7 @@ router.post('/admin/products', requireAuth, requireAdmin, productsController.cre
 router.put('/admin/products/:id', requireAuth, requireAdmin, productsController.updateProduct);
 router.delete('/admin/products/:id', requireAuth, requireAdmin, productsController.deleteProduct);
 router.post('/admin/products/bulk-delete', requireAuth, requireAdmin, productsController.bulkDeleteProducts);
+router.patch('/admin/products/:id/status', requireAuth, requireAdmin, productsController.setProductActive);
 router.post(
   '/admin/products/:id/images',
   requireAuth,

@@ -58,6 +58,7 @@ async function shapeProduct(product, { isAdmin, images, primaryImageUrl, groupId
   if (isAdmin) {
     base.stock_quantity = product.stock_quantity;
     base.low_stock_threshold = product.low_stock_threshold;
+    base.is_active = Boolean(product.is_active);
   }
   if (images) {
     base.images = await Promise.all(images.map(async (img) => ({ ...img, url: await signImageUrl(img.url) })));
@@ -90,6 +91,12 @@ async function listProducts(query, { isAdmin }) {
     search: query.search || null,
     tag: query.tag || null,
     sort: query.sort || 'newest',
+    // Inactive products only surface when the caller is BOTH an admin AND
+    // explicitly asking for the management view (query.includeInactive) —
+    // an admin merely browsing the storefront must see exactly what a
+    // customer sees, per product requirement: disabled means invisible to
+    // everyone in product-list views, admin included.
+    includeInactive: isAdmin && query.includeInactive === 'true',
   };
 
   const [rows, total] = await Promise.all([
@@ -105,9 +112,10 @@ async function listProducts(query, { isAdmin }) {
   };
 }
 
-async function getProductDetail(id, { isAdmin }) {
+async function getProductDetail(id, { isAdmin, includeInactive }) {
   const product = await productModel.findById(id);
   if (!product) throw ApiError.notFound('Product not found');
+  if (!(isAdmin && includeInactive) && !product.is_active) throw ApiError.notFound('Product not found');
   const images = await productImageModel.listByProductId(id);
   const groupIds = isAdmin ? await productGroupItemModel.listGroupIdsForProduct(id) : undefined;
   return shapeProduct(product, { isAdmin, images, groupIds });
@@ -141,6 +149,14 @@ async function bulkSoftDelete(ids) {
   return ids;
 }
 
+async function setProductActive(id, isActive) {
+  const existing = await productModel.findById(id);
+  if (!existing) throw ApiError.notFound('Product not found');
+  await productModel.setActive(id, isActive);
+  const updated = await productModel.findById(id);
+  return shapeProduct(updated, { isAdmin: true });
+}
+
 async function setGroupsForProduct(productId, groupIds) {
   const product = await productModel.findById(productId);
   if (!product) throw ApiError.notFound('Product not found');
@@ -155,6 +171,7 @@ module.exports = {
   updateProduct,
   softDeleteProduct,
   bulkSoftDelete,
+  setProductActive,
   setGroupsForProduct,
   shapeProduct,
 };

@@ -12,6 +12,7 @@ const SORT_MAP = {
 
 function baseQuery(filters, trx = db) {
   const q = trx({ p: TABLE }).whereNull('p.deleted_at');
+  if (!filters.includeInactive) q.where('p.is_active', true);
 
   if (filters.categoryId) {
     q.where('p.category_id', filters.categoryId);
@@ -117,6 +118,10 @@ function softDeleteProduct(id, trx = db) {
   return trx(TABLE).where({ id }).update({ deleted_at: new Date() });
 }
 
+function setActive(id, isActive, trx = db) {
+  return trx(TABLE).where({ id }).update({ is_active: Boolean(isActive), updated_at: new Date() });
+}
+
 function softDeleteMany(ids, trx = db) {
   return trx(TABLE).whereIn('id', ids).update({ deleted_at: new Date() });
 }
@@ -136,5 +141,6 @@ module.exports = {
   updateProduct,
   softDeleteProduct,
   softDeleteMany,
+  setActive,
   decrementStock,
 };

@@ -17,15 +17,16 @@ const listGroupProducts = asyncHandler(async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
 
-  const [rows, total] = await Promise.all([
-    productGroupItemModel.listProductsForGroup(groupId, {
-      limit: pageSize,
-      offset: (page - 1) * pageSize,
-    }),
-    productGroupItemModel.countProductsForGroup(groupId),
-  ]);
-
   const isAdmin = isAdminReq(req);
+  const includeInactive = isAdmin && req.query.includeInactive === 'true';
+  const [rows, total] = await Promise.all([
+    productGroupItemModel.listProductsForGroup(
+      groupId,
+      { limit: pageSize, offset: (page - 1) * pageSize },
+      { includeInactive },
+    ),
+    productGroupItemModel.countProductsForGroup(groupId, { includeInactive }),
+  ]);
   res.status(200).json({
     items: await Promise.all(
       rows.map((row) => productService.shapeProduct(row, { isAdmin, primaryImageUrl: row.primary_image_url })),

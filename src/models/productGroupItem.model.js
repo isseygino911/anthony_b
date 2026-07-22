@@ -2,11 +2,13 @@ const db = require('../config/db');
 
 const TABLE = 'product_group_items';
 
-function listProductsForGroup(groupId, { limit, offset }, trx = db) {
-  return trx({ p: 'products' })
+function listProductsForGroup(groupId, { limit, offset }, { includeInactive = false } = {}, trx = db) {
+  const q = trx({ p: 'products' })
     .join(`${TABLE} as pgi`, 'pgi.product_id', 'p.id')
     .where('pgi.group_id', groupId)
-    .whereNull('p.deleted_at')
+    .whereNull('p.deleted_at');
+  if (!includeInactive) q.where('p.is_active', true);
+  return q
     .select(
       'p.*',
       trx.raw(
@@ -18,13 +20,13 @@ function listProductsForGroup(groupId, { limit, offset }, trx = db) {
     .offset(offset);
 }
 
-async function countProductsForGroup(groupId, trx = db) {
-  const row = await trx({ p: 'products' })
+async function countProductsForGroup(groupId, { includeInactive = false } = {}, trx = db) {
+  const q = trx({ p: 'products' })
     .join(`${TABLE} as pgi`, 'pgi.product_id', 'p.id')
     .where('pgi.group_id', groupId)
-    .whereNull('p.deleted_at')
-    .count({ count: 'p.id' })
-    .first();
+    .whereNull('p.deleted_at');
+  if (!includeInactive) q.where('p.is_active', true);
+  const row = await q.count({ count: 'p.id' }).first();
   return Number(row.count);
 }
 

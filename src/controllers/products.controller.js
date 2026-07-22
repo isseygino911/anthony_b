@@ -36,8 +36,10 @@ const listProducts = asyncHandler(async (req, res) => {
 });
 
 const getProduct = asyncHandler(async (req, res) => {
+  const isAdmin = isAdminReq(req);
   const product = await productService.getProductDetail(Number(req.params.id), {
-    isAdmin: isAdminReq(req),
+    isAdmin,
+    includeInactive: isAdmin && req.query.includeInactive === 'true',
   });
   res.status(200).json(product);
 });
@@ -61,6 +63,11 @@ const bulkDeleteProducts = asyncHandler(async (req, res) => {
   const { ids } = req.body;
   const softDeleted = await productService.bulkSoftDelete(ids);
   res.status(200).json({ softDeleted });
+});
+
+const setProductActive = asyncHandler(async (req, res) => {
+  const product = await productService.setProductActive(Number(req.params.id), Boolean(req.body.is_active));
+  res.status(200).json(product);
 });
 
 const uploadProductImages = asyncHandler(async (req, res) => {
@@ -98,6 +105,7 @@ module.exports = {
   updateProduct,
   deleteProduct,
   bulkDeleteProducts,
+  setProductActive,
   uploadProductImages,
   setPrimaryImage,
   deleteProductImage,
