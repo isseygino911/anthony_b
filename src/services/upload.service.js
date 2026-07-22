@@ -1,4 +1,4 @@
-const { PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const db = require('../config/db');
@@ -32,11 +32,44 @@ async function putFile(file, prefix) {
   return objectUrl(key);
 }
 
+// Same as putFile, but for raw bytes with no Multer file wrapper (e.g. an
+// AI-generated image returned as an in-memory buffer, not an upload).
+async function putBuffer(buffer, mimetype, prefix, ext = '.png') {
+  assertConfigured();
+  const key = `${prefix}/${uuidv4()}${ext}`;
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: mimetype,
+    })
+  );
+  return objectUrl(key);
+}
+
 async function deleteObjectByUrl(url) {
   assertConfigured();
   const key = url.split(`${bucket}.s3.${region}.amazonaws.com/`)[1];
   if (!key) return;
   await s3Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+// Fetches a stored object's raw bytes + mime type back out of S3 (bucket has
+// Block Public Access, so a plain HTTP fetch of the stored URL won't work) —
+// used by neon-design-worker.js to hand the user's uploaded/drawn/rendered
+// image to Gemini as inline image bytes.
+async function getObjectBuffer(url) {
+  assertConfigured();
+  const key = url.split(`${bucket}.s3.${region}.amazonaws.com/`)[1];
+  if (!key) throw ApiError.badRequest('Not a recognized S3 object URL');
+  const result = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const chunks = [];
+  // eslint-disable-next-line no-restricted-syntax
+  for await (const chunk of result.Body) {
+    chunks.push(chunk);
+  }
+  return { buffer: Buffer.concat(chunks), mimetype: result.ContentType || 'image/png' };
 }
 
 // POST /api/admin/products/:id/images
@@ -95,6 +128,9 @@ async function deleteDocumentFile(url) {
 }
 
 module.exports = {
+  putFile,
+  putBuffer,
+  getObjectBuffer,
   uploadProductImages,
   setPrimaryImage,
   deleteProductImage,

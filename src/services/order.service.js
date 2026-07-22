@@ -84,6 +84,8 @@ async function createOrder(userId, shippingAddress) {
       await productModel.decrementStock(row.product_id, row.quantity, trx);
       // eslint-disable-next-line no-await-in-loop
       await notificationService.checkAndNotifyLowStock(product, oldQuantity, newQuantity, trx);
+      // eslint-disable-next-line no-await-in-loop
+      await notificationService.checkAndNotifyCustomDesignOrdered(product, trx);
     }
 
     await cartModel.deleteAllForIdentity({ userId }, trx);

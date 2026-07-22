@@ -76,6 +76,26 @@ async function applySchema(db) {
     t.datetime('created_at');
   });
 
+  await db.schema.createTable('custom_neon_designs', (t) => {
+    t.increments('id');
+    t.integer('user_id').nullable();
+    t.string('session_id').nullable();
+    t.string('design_type');
+    t.json('input_payload');
+    t.string('size').nullable();
+    t.string('neon_color').nullable();
+    t.decimal('price', 10, 2).nullable();
+    t.string('status').defaultTo('pending');
+    t.integer('attempts').defaultTo(0);
+    t.text('last_error').nullable();
+    t.string('generated_image_url').nullable();
+    t.integer('product_id').nullable();
+    t.text('admin_notes').nullable();
+    t.datetime('images_purged_at').nullable();
+    t.datetime('created_at');
+    t.datetime('updated_at');
+  });
+
   return db;
 }
 

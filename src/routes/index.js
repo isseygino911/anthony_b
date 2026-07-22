@@ -14,6 +14,7 @@ const notificationsRoutes = require('./notifications.routes');
 const dashboardRoutes = require('./dashboard.routes');
 const assistantRoutes = require('./assistant.routes');
 const adminAnalyticsRoutes = require('./adminAnalytics.routes');
+const customNeonDesignsRoutes = require('./customNeonDesigns.routes');
 
 const router = express.Router();
 
@@ -31,5 +32,6 @@ router.use(notificationsRoutes);
 router.use(dashboardRoutes);
 router.use(assistantRoutes);
 router.use(adminAnalyticsRoutes);
+router.use(customNeonDesignsRoutes);
 
 module.exports = router;

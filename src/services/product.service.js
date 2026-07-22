@@ -79,7 +79,11 @@ async function resolveCategoryId(categoryParam) {
   if (!categoryParam) return null;
   if (/^\d+$/.test(categoryParam)) return Number(categoryParam);
   const category = await categoryModel.findBySlug(categoryParam);
-  return category ? category.id : -1; // -1 never matches -> empty result set
+  // is_internal categories (e.g. "Custom Neon Signs") never resolve via
+  // slug lookup either — same empty-result sentinel as a nonexistent slug,
+  // so a direct /category/<internal-slug> visit behaves like the category
+  // was never there.
+  return category && !category.is_internal ? category.id : -1;
 }
 
 async function listProducts(query, { isAdmin }) {

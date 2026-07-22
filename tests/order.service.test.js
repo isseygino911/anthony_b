@@ -20,7 +20,16 @@ const { applySchema } = require('./helpers/testDb');
 const db = isolateDb(); // must happen before requiring order.service below
 const orderService = require('../src/services/order.service');
 
-const TABLES = ['notifications', 'order_audit_log', 'order_items', 'orders', 'carts', 'product_images', 'products'];
+const TABLES = [
+  'notifications',
+  'order_audit_log',
+  'order_items',
+  'orders',
+  'carts',
+  'custom_neon_designs',
+  'product_images',
+  'products',
+];
 
 beforeEach(async () => {
   // Fresh tables per test, same in-memory database handle.

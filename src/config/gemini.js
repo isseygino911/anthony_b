@@ -14,4 +14,5 @@ module.exports = {
   isConfigured,
   embeddingModel: config.gemini.embeddingModel,
   chatModel: config.gemini.chatModel,
+  imageModel: config.gemini.imageModel,
 };

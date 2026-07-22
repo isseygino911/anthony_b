@@ -35,5 +35,42 @@ module.exports = {
         NODE_ENV: 'production',
       },
     },
+    {
+      // Polls custom_neon_designs for designs queued by
+      // customNeonDesign.service.js and calls Gemini's image model to
+      // generate a photorealistic neon-sign preview — see
+      // scripts/neon-design-worker.js. Requires GEMINI_API_KEY + AWS S3 env
+      // vars in .env.
+      name: 'anthony-ecom-neon-worker',
+      script: './scripts/neon-design-worker.js',
+      cwd: __dirname,
+      instances: 1,
+      exec_mode: 'fork',
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 3000,
+      env: {
+        NODE_ENV: 'production',
+      },
+    },
+    {
+      // One-shot cleanup: deletes S3 images for custom neon designs never
+      // confirmed into an order after NEON_DESIGN_RETENTION_HOURS — see
+      // scripts/neon-design-cleanup.js. Runs once and exits (cron_restart,
+      // not autorestart) rather than staying resident like the two workers
+      // above; the DB row itself is never deleted.
+      name: 'anthony-ecom-neon-cleanup',
+      script: './scripts/neon-design-cleanup.js',
+      cwd: __dirname,
+      instances: 1,
+      exec_mode: 'fork',
+      watch: false,
+      autorestart: false,
+      cron_restart: '0 * * * *', // hourly; the script itself is a no-op if nothing has aged out yet
+      env: {
+        NODE_ENV: 'production',
+      },
+    },
   ],
 };

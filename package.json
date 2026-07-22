@@ -11,6 +11,9 @@
     "migrate:rollback": "knex --knexfile migrations/knexfile.js migrate:rollback",
     "seed": "knex --knexfile migrations/knexfile.js seed:run",
     "seo-worker": "node scripts/seo-geo-worker.js",
+    "neon-worker": "node scripts/neon-design-worker.js",
+    "neon-cleanup": "node scripts/neon-design-cleanup.js",
+    "tune-neon-prompt": "node scripts/tune-neon-prompt.js",
     "test": "vitest run"
   },
   "dependencies": {

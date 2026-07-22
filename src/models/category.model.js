@@ -2,8 +2,12 @@ const db = require('../config/db');
 
 const TABLE = 'categories';
 
+// Excludes is_internal categories (e.g. "Custom Neon Signs", used only to
+// hold synthetic one-off products minted by customNeonDesign.service.js) —
+// those must never appear in storefront nav or the admin product-form
+// category picker.
 function listCategories(trx = db) {
-  return trx(TABLE).select('*').orderBy('name', 'asc');
+  return trx(TABLE).select('*').where('is_internal', false).orderBy('name', 'asc');
 }
 
 function findById(id, trx = db) {

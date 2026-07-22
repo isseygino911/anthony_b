@@ -46,6 +46,7 @@ const config = {
     apiKey: required('GEMINI_API_KEY'),
     embeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001',
     chatModel: process.env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash',
+    imageModel: process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
   },
 
   cookieDomain: process.env.COOKIE_DOMAIN || 'localhost',
