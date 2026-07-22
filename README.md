@@ -53,8 +53,11 @@ with the separate frontend repo's `npm run dev` (Vite, default
 ## Running via Docker (production)
 
 The main Express server is Docker-managed (see `Dockerfile` /
-`docker-compose.yml`); the seo-worker (`scripts/seo-geo-worker.js`) is not
-containerized and keeps running on PM2 — see "PM2 to Docker cutover" below.
+`docker-compose.yml`); the seo-worker (`scripts/seo-geo-worker.js`) currently
+keeps running on PM2 instead — see "PM2 to Docker cutover" below. It calls
+Gemini directly (no CLI subprocess, no OAuth session), so nothing stops it
+from being containerized too if that's preferred; it just hasn't been moved
+yet.
 
 ```bash
 # Build the image and start the container (reads server/.env at run time
@@ -88,10 +91,10 @@ pm2 save
 ```
 
 The `anthony-ecom-seo-worker` PM2 process is unaffected and keeps running
-as-is — it shells out to an authenticated `claude` CLI subprocess, which is
-a separate containerization problem left for later. Caddy needs no changes
-either way: it already reverse-proxies `localhost:4002` regardless of
-whether that port is served by the bare PM2 process or the container.
+as-is — it calls the Gemini API directly (`GEMINI_API_KEY` in `.env`), no
+CLI subprocess or interactive login involved. Caddy needs no changes either
+way: it already reverse-proxies `localhost:4002` regardless of whether that
+port is served by the bare PM2 process or the container.
 
 ## Running migrations/seeds
 

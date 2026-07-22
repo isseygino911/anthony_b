@@ -1,19 +1,22 @@
 /**
  * Polls product_seo for 'pending' rows (queued by productSeoSync.service.js
- * whenever an admin creates/updates a product) and, for each, invokes the
- * seo-geo-agent subagent headlessly via the Claude Code CLI to generate
- * SEO metadata + GEO content + JSON-LD schema markup, then persists the
- * Result Packet back onto the row.
+ * whenever an admin creates/updates a product) and, for each, calls Gemini
+ * directly to generate SEO metadata + GEO content, then assembles JSON-LD
+ * schema markup from known product data and persists the result.
  *
- * Runs as its own long-lived PM2 process (see ecosystem.config.js) — kept
- * separate from the API server so a slow/stuck LLM call never affects
- * request latency. See seo-geo-agent-guide.md for the overall design.
+ * No CLI subprocess, no OAuth session — just GEMINI_API_KEY (already used
+ * elsewhere in this app for embeddings/the assistant), so this runs fine
+ * headless: Docker, CI, a plain background process, whatever.
+ *
+ * Runs as its own long-lived process, separate from the API server, so a
+ * slow/stuck LLM call never affects request latency.
  *
  * Usage: node scripts/seo-geo-worker.js
  */
-const { execFile } = require('child_process');
 const db = require('../src/config/db');
 const config = require('../src/config/env');
+const { genAI, isConfigured: geminiConfigured } = require('../src/config/gemini');
+const seoGeoPromptService = require('../src/services/seoGeoPrompt.service');
 const productModel = require('../src/models/product.model');
 const categoryModel = require('../src/models/category.model');
 const productImageModel = require('../src/models/productImage.model');
@@ -21,8 +24,6 @@ const productSeoModel = require('../src/models/productSeo.model');
 
 const POLL_INTERVAL_MS = Number(process.env.SEO_WORKER_POLL_INTERVAL_MS) || 20000;
 const BATCH_SIZE = Number(process.env.SEO_WORKER_BATCH_SIZE) || 3;
-const TIMEOUT_MS = Number(process.env.SEO_WORKER_TIMEOUT_MS) || 300000;
-const CLAUDE_BIN = process.env.SEO_WORKER_CLAUDE_BIN || 'claude';
 
 function parseTags(tags) {
   if (!tags) return [];
@@ -36,6 +37,7 @@ function buildTaskPacket(product, category, primaryImage) {
     description: product.description ?? '',
     category: category ? category.name : null,
     price: Number(product.price).toFixed(2),
+    price_currency: 'USD', // the storefront hard-codes USD formatting (client/src/lib/utils.ts) — no multi-currency support exists
     availability: Number(product.stock_quantity) > 0 ? 'InStock' : 'OutOfStock',
     canonical_url: `${config.clientOrigin}/product/${product.id}`,
     image_url: primaryImage ? primaryImage.url : null,
@@ -46,47 +48,29 @@ function buildTaskPacket(product, category, primaryImage) {
   };
 }
 
-// The top-level `claude -p` invocation is a general-purpose agent that
-// delegates to seo-geo-agent as a subagent — by default it summarizes the
-// subagent's result in prose rather than passing it through. The explicit
-// "your entire response must be ONLY that exact JSON" instruction forces
-// raw passthrough (verified manually; still wraps in ```json fences
-// sometimes, hence extractJson() below).
-function buildPrompt(taskPacket) {
-  return (
-    `Use the seo-geo-agent to process this product: ${JSON.stringify(taskPacket)}\n\n` +
-    'After the agent returns its Result Packet, your entire response must be ONLY that exact JSON object, ' +
-    'verbatim, with no markdown code fences, no explanation, and no additional commentary before or after it.'
-  );
-}
-
-function extractJson(text) {
-  let t = text.trim();
-  const fenced = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
-  if (fenced) t = fenced[1].trim();
-  const start = t.indexOf('{');
-  const end = t.lastIndexOf('}');
-  if (start === -1 || end === -1 || end < start) {
-    throw new Error('No JSON object found in agent output');
-  }
-  return JSON.parse(t.slice(start, end + 1));
-}
-
-function runClaude(prompt) {
-  return new Promise((resolve, reject) => {
-    execFile(
-      CLAUDE_BIN,
-      ['-p', prompt, '--output-format', 'json'],
-      { timeout: TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] },
-      (err, stdout, stderr) => {
-        if (err) {
-          reject(new Error(`claude CLI failed: ${err.message}${stderr ? ` | stderr: ${stderr.slice(0, 500)}` : ''}`));
-          return;
-        }
-        resolve(stdout);
-      }
-    );
-  });
+// price/currency/availability/image/url are already known exactly from the
+// task packet — no reason to make the model guess or flag them as "needs
+// manual verification". Only brand/item_condition come from the model.
+function buildSchemaMarkup(product, taskPacket, modelFields) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: product.name,
+    description: product.description || null,
+    category: taskPacket.category,
+    mpn: product.sku,
+    brand: { '@type': 'Brand', name: modelFields.brand },
+    image: taskPacket.image_url,
+    offers: {
+      '@type': 'Offer',
+      price: taskPacket.price,
+      priceCurrency: taskPacket.price_currency,
+      availability: `https://schema.org/${taskPacket.availability}`,
+      url: taskPacket.canonical_url,
+      itemCondition: `https://schema.org/${modelFields.item_condition}`,
+    },
+    aggregateRating: null,
+  };
 }
 
 async function processRow(row) {
@@ -111,25 +95,22 @@ async function processRow(row) {
   const images = await productImageModel.listByProductId(product.id);
   const primaryImage = images.find((img) => img.is_primary) || images[0] || null;
   const taskPacket = buildTaskPacket(product, category, primaryImage);
-  const prompt = buildPrompt(taskPacket);
 
-  const stdout = await runClaude(prompt);
-  const envelope = JSON.parse(stdout);
-  if (envelope.is_error) {
-    throw new Error(`agent run returned an error: ${JSON.stringify(envelope).slice(0, 500)}`);
-  }
-
-  const resultPacket = extractJson(envelope.result);
+  const request = seoGeoPromptService.buildRequest(taskPacket);
+  const response = await genAI.models.generateContent(request);
+  const resultPacket = JSON.parse(response.text || '');
   if (!resultPacket.status || !resultPacket.seo || !resultPacket.geo) {
-    throw new Error(`Result Packet missing required fields: ${JSON.stringify(resultPacket).slice(0, 500)}`);
+    throw new Error(`Gemini response missing required fields: ${JSON.stringify(resultPacket).slice(0, 500)}`);
   }
+
+  const schemaMarkup = buildSchemaMarkup(product, taskPacket, resultPacket);
 
   await productSeoModel.saveResult({
     productId: row.product_id,
     status: resultPacket.status === 'ready' ? 'ready' : 'needs_review',
     seo: resultPacket.seo,
     geo: resultPacket.geo,
-    schemaMarkup: resultPacket.schema_markup,
+    schemaMarkup,
     audit: resultPacket.audit,
     flags: resultPacket.flags,
   });
@@ -138,6 +119,10 @@ async function processRow(row) {
 }
 
 async function tick() {
+  if (!geminiConfigured) {
+    console.error('[seo-geo-worker] GEMINI_API_KEY not set — skipping tick');
+    return;
+  }
   const pending = await productSeoModel.listPending(BATCH_SIZE);
   // eslint-disable-next-line no-restricted-syntax
   for (const row of pending) {
@@ -172,9 +157,7 @@ if (require.main === module) {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  console.log(
-    `[seo-geo-worker] started (poll every ${POLL_INTERVAL_MS}ms, batch ${BATCH_SIZE}, claude bin "${CLAUDE_BIN}")`
-  );
+  console.log(`[seo-geo-worker] started (poll every ${POLL_INTERVAL_MS}ms, batch ${BATCH_SIZE}, model: Gemini)`);
   loop();
 }
 
