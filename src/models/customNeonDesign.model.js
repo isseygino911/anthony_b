@@ -140,6 +140,26 @@ function countAdmin({ status }, trx = db) {
   return q;
 }
 
+// Per-user generation activity (admin "Custom Neon Usage" tab) — rows
+// without a user_id (pre-login-requirement anon-session designs) can't be
+// attributed to anyone and are excluded.
+function listUsageByUser({ limit, offset }, trx = db) {
+  return trx(TABLE)
+    .whereNotNull('user_id')
+    .groupBy('user_id')
+    .select('user_id')
+    .count({ designCount: '*' })
+    .sum({ confirmedCount: trx.raw('CASE WHEN product_id IS NOT NULL THEN 1 ELSE 0 END') })
+    .max({ lastGeneratedAt: 'created_at' })
+    .orderBy('lastGeneratedAt', 'desc')
+    .limit(limit)
+    .offset(offset);
+}
+
+function countUsageByUser(trx = db) {
+  return trx(TABLE).whereNotNull('user_id').countDistinct({ count: 'user_id' }).first();
+}
+
 module.exports = {
   MAX_ATTEMPTS,
   findById,
@@ -157,4 +177,6 @@ module.exports = {
   countAdmin,
   listPurgeCandidates,
   purgeImages,
+  listUsageByUser,
+  countUsageByUser,
 };

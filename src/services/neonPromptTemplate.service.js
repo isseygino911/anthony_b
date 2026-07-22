@@ -8,9 +8,9 @@ const { Modality } = require('@google/genai');
 const { imageModel } = require('../config/gemini');
 
 const SIZE_LABELS = {
-  small: 'small (roughly 12-16 inches wide)',
-  medium: 'medium (roughly 20-24 inches wide)',
-  large: 'large (roughly 30-36 inches wide)',
+  small: '12 inches by 12 inches',
+  medium: '24 inches by 24 inches',
+  large: '36 inches by 36 inches',
 };
 
 const COLOR_LABELS = {

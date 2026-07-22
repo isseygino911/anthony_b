@@ -15,6 +15,11 @@ function findByProvider(provider, providerId, trx = db) {
   return trx(TABLE).where({ provider, provider_id: providerId }).first();
 }
 
+function findByIds(ids, trx = db) {
+  if (!ids.length) return Promise.resolve([]);
+  return trx(TABLE).whereIn('id', ids);
+}
+
 async function insertUser(data, trx = db) {
   const now = new Date();
   const [id] = await trx(TABLE).insert({
@@ -30,4 +35,4 @@ async function insertUser(data, trx = db) {
   return findById(id, trx);
 }
 
-module.exports = { findByEmail, findById, findByProvider, insertUser, PUBLIC_COLUMNS };
+module.exports = { findByEmail, findById, findByIds, findByProvider, insertUser, PUBLIC_COLUMNS };

@@ -3,6 +3,7 @@ const customNeonDesignModel = require('../models/customNeonDesign.model');
 const productModel = require('../models/product.model');
 const productImageModel = require('../models/productImage.model');
 const categoryModel = require('../models/category.model');
+const userModel = require('../models/user.model');
 const uploadService = require('../services/upload.service');
 const cartService = require('./cart.service');
 const ApiError = require('../utils/apiError');
@@ -10,9 +11,9 @@ const { signImageUrl } = require('../utils/signedImageUrl');
 
 const CUSTOM_NEON_CATEGORY_SLUG = 'custom-neon-signs';
 
-// Matches the reference "Custom AI Creation" mockup's size tiers. Not
-// admin-configurable today — revisit if pricing needs to change per-design.
-const SIZE_PRICES = { small: 149, medium: 249, large: 349 };
+// Not admin-configurable today — revisit if pricing needs to change per-design.
+const SIZE_PRICES = { small: 249.99, medium: 399.99, large: 524.99 };
+const SIZE_DIMENSIONS = { small: '12"x12"', medium: '24"x24"', large: '36"x36"' };
 const NEON_COLORS = ['amber', 'pink', 'blue', 'white'];
 
 function assertSizeAndColor(size, neonColor) {
@@ -134,7 +135,7 @@ async function confirmDesign(id, identity) {
       {
         category_id: category.id,
         name: `Custom Neon Design #${row.id}`,
-        description: `Custom AI-generated neon sign design (${row.size}, ${row.neon_color}).`,
+        description: `Custom AI-generated neon sign design (${SIZE_DIMENSIONS[row.size]}, ${row.neon_color}).`,
         price,
         sku: `NEON-${row.id}`,
         stock_quantity: 9999,
@@ -184,8 +185,42 @@ async function updateAdminNotes(id, adminNotes) {
   return shapeDesign(await customNeonDesignModel.findById(id));
 }
 
+// Admin "Custom Neon Usage" tab — one row per user who has ever generated a
+// design, with counts + last-activity timestamp, so admins can see who's
+// using the feature (and spot anyone worth reviewing against the
+// 2-per-minute generation rate limit).
+async function getUsageByUser({ page, pageSize }) {
+  const limit = pageSize;
+  const offset = (page - 1) * pageSize;
+  const [rows, countRow] = await Promise.all([
+    customNeonDesignModel.listUsageByUser({ limit, offset }),
+    customNeonDesignModel.countUsageByUser(),
+  ]);
+
+  const users = await userModel.findByIds(rows.map((row) => row.user_id));
+  const userById = new Map(users.map((user) => [user.id, user]));
+
+  return {
+    items: rows.map((row) => {
+      const user = userById.get(row.user_id);
+      return {
+        userId: row.user_id,
+        userEmail: user?.email ?? null,
+        userName: user?.name ?? null,
+        designCount: Number(row.designCount),
+        confirmedCount: Number(row.confirmedCount),
+        lastGeneratedAt: row.lastGeneratedAt,
+      };
+    }),
+    total: Number(countRow.count),
+    page,
+    pageSize,
+  };
+}
+
 module.exports = {
   SIZE_PRICES,
+  SIZE_DIMENSIONS,
   NEON_COLORS,
   createDesign,
   getDesign,
@@ -194,4 +229,5 @@ module.exports = {
   listAdmin,
   getAdmin,
   updateAdminNotes,
+  getUsageByUser,
 };

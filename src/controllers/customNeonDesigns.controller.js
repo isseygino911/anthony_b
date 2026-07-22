@@ -67,6 +67,13 @@ const updateDesignAdminNotes = asyncHandler(async (req, res) => {
   res.status(200).json(design);
 });
 
+const listUsageAdmin = asyncHandler(async (req, res) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
+  const result = await customNeonDesignService.getUsageByUser({ page, pageSize });
+  res.status(200).json(result);
+});
+
 module.exports = {
   createDesign,
   getDesign,
@@ -75,4 +82,5 @@ module.exports = {
   listDesignsAdmin,
   getDesignAdmin,
   updateDesignAdminNotes,
+  listUsageAdmin,
 };

@@ -127,11 +127,11 @@ describe('customNeonDesign.service.confirmDesign', () => {
     const { design, cart } = await customNeonDesignService.confirmDesign(id, anonIdentity);
 
     expect(design.status).toBe('ready');
-    expect(design.price).toBe(249);
+    expect(design.price).toBe(399.99);
     expect(design.productId).toBeTruthy();
 
     const product = await db('products').where({ id: design.productId }).first();
-    expect(Number(product.price)).toBe(249);
+    expect(Number(product.price)).toBe(399.99);
     expect(product).toMatchObject({ is_active: 0, sku: `NEON-${id}` });
 
     const image = await db('product_images').where({ product_id: design.productId }).first();
@@ -166,14 +166,14 @@ describe('customNeonDesign.service.confirmDesign', () => {
     });
   });
 
-  it('prices small/large tiers per the reference mockup, using the size stored on the design (set at generation time)', async () => {
+  it('prices small/large tiers per the size/price map, using the size stored on the design (set at generation time)', async () => {
     const smallId = await seedDesign({ size: 'small', neon_color: 'blue' });
     const { design: small } = await customNeonDesignService.confirmDesign(smallId, anonIdentity);
-    expect(small.price).toBe(149);
+    expect(small.price).toBe(249.99);
 
     const largeId = await seedDesign({ session_id: 'anon-session-1', size: 'large', neon_color: 'white' });
     const { design: large } = await customNeonDesignService.confirmDesign(largeId, anonIdentity);
-    expect(large.price).toBe(349);
+    expect(large.price).toBe(524.99);
   });
 });
 

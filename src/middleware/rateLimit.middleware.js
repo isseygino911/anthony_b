@@ -46,4 +46,26 @@ const adminAgentLimiter = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'Too many analytics queries, try again later' } },
 });
 
-module.exports = { generalLimiter, loginLimiter, orderLimiter, assistantLimiter, adminAgentLimiter };
+// Custom neon design create/regenerate each spend a Gemini image-generation
+// call — capped per logged-in user (not per-IP, since these routes require
+// auth) rather than the default IP-based key, so the limit tracks token
+// usage per account regardless of shared/NATed IPs.
+const neonGenerationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 2,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user ? `user:${req.user.id}` : req.ip),
+  message: {
+    error: { code: 'RATE_LIMITED', message: 'Too many design generations — please wait a minute and try again' },
+  },
+});
+
+module.exports = {
+  generalLimiter,
+  loginLimiter,
+  orderLimiter,
+  assistantLimiter,
+  adminAgentLimiter,
+  neonGenerationLimiter,
+};
