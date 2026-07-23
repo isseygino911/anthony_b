@@ -156,6 +156,27 @@ async function confirmDesign(id, identity) {
   return { design: await shapeDesign(await customNeonDesignModel.findById(id)), cart };
 }
 
+const SHOWCASE_LABELS = {
+  upload: 'Photo-inspired design',
+  draw: 'Hand-drawn design',
+  text: 'Custom text design',
+};
+
+// Public landing-page gallery. Only ever exposes the generated artwork image
+// + a generic design-type label — never input_payload (a customer's
+// uploaded photo or the text/name they typed), which stays admin-only.
+async function listShowcase(limit) {
+  const rows = await customNeonDesignModel.listShowcase(limit);
+  return Promise.all(
+    rows.map(async (row) => ({
+      id: row.id,
+      label: SHOWCASE_LABELS[row.design_type] ?? 'Custom design',
+      dimensions: row.size ? SIZE_DIMENSIONS[row.size] : null,
+      imageUrl: await signImageUrl(row.generated_image_url),
+    })),
+  );
+}
+
 async function listAdmin(query, { page, pageSize }) {
   const limit = pageSize;
   const offset = (page - 1) * pageSize;
@@ -226,6 +247,7 @@ module.exports = {
   getDesign,
   regenerate,
   confirmDesign,
+  listShowcase,
   listAdmin,
   getAdmin,
   updateAdminNotes,

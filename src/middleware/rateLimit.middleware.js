@@ -61,6 +61,16 @@ const neonGenerationLimiter = rateLimit({
   },
 });
 
+// Public, unauthenticated subscribe endpoint — capped per-IP against
+// scripted spam-subscribe abuse.
+const newsletterLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many subscribe attempts, try again later' } },
+});
+
 module.exports = {
   generalLimiter,
   loginLimiter,
@@ -68,4 +78,5 @@ module.exports = {
   assistantLimiter,
   adminAgentLimiter,
   neonGenerationLimiter,
+  newsletterLimiter,
 };

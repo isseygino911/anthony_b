@@ -30,6 +30,7 @@ async function getTheme() {
     custom_colors: themeRow.custom_colors,
     resolvedColors: resolveColors(themeRow),
     section_styles: parseJsonColumn(row.section_styles),
+    social_links: parseJsonColumn(row.social_links),
     default_mode: row.default_mode,
   };
 }
@@ -65,6 +66,9 @@ async function updateTheme(data) {
     patch.custom_colors = data.custom_colors ? JSON.stringify(data.custom_colors) : null;
   }
   if (data.section_styles !== undefined) patch.section_styles = JSON.stringify(data.section_styles);
+  if (data.social_links !== undefined) {
+    patch.social_links = data.social_links ? JSON.stringify(data.social_links) : null;
+  }
   if (data.default_mode !== undefined) patch.default_mode = data.default_mode;
 
   const row = await siteThemeModel.upsertRow(patch);
@@ -72,6 +76,7 @@ async function updateTheme(data) {
     ...row,
     custom_colors: parseJsonColumn(row.custom_colors),
     section_styles: parseJsonColumn(row.section_styles),
+    social_links: parseJsonColumn(row.social_links),
   };
 }
 

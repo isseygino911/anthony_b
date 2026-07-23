@@ -12,7 +12,7 @@ exports.seed = async function seed(knex) {
     brand_name: 'Demo Store',
     tagline: 'Quality goods, honestly priced.',
     logo_url: null,
-    palette_id: 'ocean',
+    palette_id: 'neon',
     custom_colors: null,
     section_styles: JSON.stringify({
       hero: 'gradient',
@@ -20,6 +20,7 @@ exports.seed = async function seed(knex) {
       groupBanner: 'gradient',
       footer: 'flat',
     }),
+    social_links: JSON.stringify({ instagram: '', pinterest: '', behance: '' }),
     default_mode: 'auto',
     updated_at: knex.fn.now(),
   });

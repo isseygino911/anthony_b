@@ -7,6 +7,11 @@ const { neonGenerationLimiter } = require('../middleware/rateLimit.middleware');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const router = express.Router();
 
+// Public landing-page gallery — must be registered before the requireAuth
+// blanket below (and named "showcase", not a param route) so it's never
+// mistaken for /custom-neon-designs/:id or swallowed by the auth gate.
+router.get('/custom-neon-designs/showcase', customNeonDesignsController.listShowcase);
+
 // Unlike cart, this requires login (not anon-session) — every design/regenerate
 // call spends a Gemini image-generation call, so it's gated to accounts only
 // to keep token usage attributable and abuse-resistant.

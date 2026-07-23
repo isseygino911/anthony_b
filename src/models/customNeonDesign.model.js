@@ -128,6 +128,18 @@ function purgeImages(id, inputPayloadWithoutImages, trx = db) {
     });
 }
 
+// Public landing-page gallery — most recent finished designs, image-only
+// (no input_payload/admin_notes exposed; see customNeonDesign.service.js).
+function listShowcase(limit = 10, trx = db) {
+  return trx(TABLE)
+    .select('id', 'design_type', 'size', 'generated_image_url')
+    .where({ status: 'ready' })
+    .whereNotNull('generated_image_url')
+    .whereNull('images_purged_at')
+    .orderBy('created_at', 'desc')
+    .limit(limit);
+}
+
 function listAdmin({ status }, { limit, offset }, trx = db) {
   const q = trx(TABLE).select('*').orderBy('created_at', 'desc').limit(limit).offset(offset);
   if (status) q.where({ status });
@@ -173,6 +185,7 @@ module.exports = {
   requeue,
   confirm,
   updateAdminNotes,
+  listShowcase,
   listAdmin,
   countAdmin,
   listPurgeCandidates,

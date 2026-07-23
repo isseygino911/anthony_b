@@ -14,6 +14,7 @@ const PALETTES = {
   berry: { accent: '#9d174d', accentSecondary: '#7c3aed' },
   slate: { accent: '#334155', accentSecondary: '#64748b' },
   graphite: { accent: '#111111', accentSecondary: '#707072' },
+  neon: { accent: '#e6ff00', accentSecondary: '#bdd200' },
 };
 
 const PALETTE_IDS = Object.keys(PALETTES);
