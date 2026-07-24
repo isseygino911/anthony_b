@@ -11,8 +11,7 @@ const sendMessage = asyncHandler(async (req, res) => {
 
   const result = await assistantService.sendMessage({
     message: trimmed,
-    userId: req.user ? req.user.id : null,
-    anonSessionId: req.anonSessionId,
+    userId: req.user.id,
     conversationId: conversationId ? Number(conversationId) : undefined,
   });
 

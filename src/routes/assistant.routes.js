@@ -1,22 +1,14 @@
 const express = require('express');
 const assistantController = require('../controllers/assistant.controller');
-const { attachUserIfPresent } = require('../middleware/auth.middleware');
-const { ensureAnonSession } = require('../middleware/anonSession.middleware');
+const { requireAuth } = require('../middleware/auth.middleware');
 const { assistantLimiter } = require('../middleware/rateLimit.middleware');
 
 const router = express.Router();
 
-// Public — works for both anonymous and logged-in callers, same pattern as
-// cart.routes.js.
-function maybeAnonSession(req, res, next) {
-  if (req.user) return next();
-  return ensureAnonSession(req, res, next);
-}
-
+// Logged-in users only — anonymous visitors are rejected with 401.
 router.post(
   '/assistant/messages',
-  attachUserIfPresent,
-  maybeAnonSession,
+  requireAuth,
   assistantLimiter,
   assistantController.sendMessage
 );
