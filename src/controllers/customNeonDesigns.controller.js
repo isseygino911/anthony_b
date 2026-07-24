@@ -50,6 +50,13 @@ const confirmDesign = asyncHandler(async (req, res) => {
   res.status(200).json(result);
 });
 
+const listMine = asyncHandler(async (req, res) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
+  const result = await customNeonDesignService.listMine(identityFromReq(req), { page, pageSize });
+  res.status(200).json(result);
+});
+
 const listShowcase = asyncHandler(async (req, res) => {
   const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 10));
   const items = await customNeonDesignService.listShowcase(limit);
@@ -85,6 +92,7 @@ module.exports = {
   getDesign,
   regenerateDesign,
   confirmDesign,
+  listMine,
   listShowcase,
   listDesignsAdmin,
   getDesignAdmin,

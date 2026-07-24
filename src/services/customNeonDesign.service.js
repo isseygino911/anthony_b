@@ -121,9 +121,21 @@ async function regenerate(id, identity, { size, neonColor } = {}) {
 // time, i.e. whatever the AI actually rendered) rather than accepting new
 // values here — guarantees the purchased product always matches the preview
 // image the customer confirmed, with no way for the two to drift apart.
+//
+// Idempotent for designs that were already confirmed once (row.product_id
+// set): re-running the product-creation transaction would collide on the
+// unique `sku` (NEON-${row.id}), so "confirm" on an already-confirmed design
+// just re-adds the existing product to the cart instead — this is what lets
+// the "Order again" button on the My Designs page reuse this same endpoint.
 async function confirmDesign(id, identity) {
   const row = await getOwnedDesign(id, identity);
   if (row.status !== 'ready') throw ApiError.badRequest('Design preview is not ready yet');
+
+  if (row.product_id) {
+    const cart = await cartService.addItem(identity, row.product_id, 1);
+    return { design: await shapeDesign(row), cart };
+  }
+
   assertSizeAndColor(row.size, row.neon_color);
 
   const price = SIZE_PRICES[row.size];
@@ -154,6 +166,26 @@ async function confirmDesign(id, identity) {
   // Reuses the existing, unmodified cart flow — same as adding any other product.
   const cart = await cartService.addItem(identity, productId, 1);
   return { design: await shapeDesign(await customNeonDesignModel.findById(id)), cart };
+}
+
+// Customer-facing "My Designs" list — every design the caller has ever
+// generated (any status), so they can track pending previews and re-order
+// past confirmed designs.
+async function listMine(identity, { page, pageSize }) {
+  assertIdentity(identity);
+  const userId = identity.user.id;
+  const limit = pageSize;
+  const offset = (page - 1) * pageSize;
+  const [rows, countRow] = await Promise.all([
+    customNeonDesignModel.listMine(userId, { limit, offset }),
+    customNeonDesignModel.countMine(userId),
+  ]);
+  return {
+    items: await Promise.all(rows.map(shapeDesign)),
+    total: Number(countRow.count),
+    page,
+    pageSize,
+  };
 }
 
 const SHOWCASE_LABELS = {
@@ -247,6 +279,7 @@ module.exports = {
   getDesign,
   regenerate,
   confirmDesign,
+  listMine,
   listShowcase,
   listAdmin,
   getAdmin,

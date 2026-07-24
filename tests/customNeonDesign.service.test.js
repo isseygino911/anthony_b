@@ -175,6 +175,48 @@ describe('customNeonDesign.service.confirmDesign', () => {
     const { design: large } = await customNeonDesignService.confirmDesign(largeId, anonIdentity);
     expect(large.price).toBe(524.99);
   });
+
+  // "Order again" (My Designs page) calls this same endpoint on a design
+  // that already has product_id set — must not re-run the product-creation
+  // transaction (that would collide on the unique sku NEON-${id}), just
+  // re-add the existing product to the cart.
+  it('re-confirming an already-confirmed design reuses the existing product instead of minting a duplicate', async () => {
+    const id = await seedDesign();
+
+    const first = await customNeonDesignService.confirmDesign(id, anonIdentity);
+    const second = await customNeonDesignService.confirmDesign(id, anonIdentity);
+
+    expect(second.design.productId).toBe(first.design.productId);
+
+    const products = await db('products').where({ sku: `NEON-${id}` });
+    expect(products).toHaveLength(1);
+
+    expect(second.cart.items).toHaveLength(1);
+    expect(second.cart.items[0]).toMatchObject({ productId: first.design.productId, quantity: 2 });
+  });
+});
+
+describe('customNeonDesign.service.listMine', () => {
+  const userIdentity = { user: { id: 42, role: 'customer' }, anonSessionId: null };
+
+  it('returns only the calling user\'s designs, newest first', async () => {
+    await seedDesign({ user_id: 42, session_id: null, created_at: new Date('2026-01-01') });
+    await seedDesign({ user_id: 42, session_id: null, created_at: new Date('2026-01-02') });
+    await seedDesign({ user_id: 99, session_id: null, created_at: new Date('2026-01-03') });
+
+    const result = await customNeonDesignService.listMine(userIdentity, { page: 1, pageSize: 20 });
+
+    expect(result.total).toBe(2);
+    expect(result.items).toHaveLength(2);
+    expect(result.items.every((item) => item)).toBe(true);
+    expect(new Date(result.items[0].createdAt).getTime()).toBeGreaterThan(new Date(result.items[1].createdAt).getTime());
+  });
+
+  it('returns an empty list for a user with no designs', async () => {
+    const result = await customNeonDesignService.listMine(userIdentity, { page: 1, pageSize: 20 });
+    expect(result.items).toHaveLength(0);
+    expect(result.total).toBe(0);
+  });
 });
 
 describe('customNeonDesign.service.regenerate — size/color changes before re-running', () => {

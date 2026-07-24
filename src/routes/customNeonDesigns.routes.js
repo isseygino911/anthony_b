@@ -24,6 +24,8 @@ router.post(
   upload.single('file'),
   customNeonDesignsController.createDesign
 );
+// "My Designs" — every design the caller has ever generated, any status.
+router.get('/custom-neon-designs', customNeonDesignsController.listMine);
 router.get('/custom-neon-designs/:id', customNeonDesignsController.getDesign);
 router.post(
   '/custom-neon-designs/:id/regenerate',

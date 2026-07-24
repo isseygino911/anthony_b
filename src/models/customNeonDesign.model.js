@@ -41,6 +41,16 @@ function listPending(limit = 10, trx = db) {
   return trx(TABLE).where({ status: 'pending' }).orderBy('updated_at', 'asc').limit(limit);
 }
 
+// Customer-facing "My Designs" list — every design the user has ever
+// generated, regardless of status, newest first.
+function listMine(userId, { limit, offset }, trx = db) {
+  return trx(TABLE).where({ user_id: userId }).orderBy('created_at', 'desc').limit(limit).offset(offset);
+}
+
+function countMine(userId, trx = db) {
+  return trx(TABLE).where({ user_id: userId }).count({ count: '*' }).first();
+}
+
 function markProcessing(id, trx = db) {
   return trx(TABLE).where({ id }).update({ status: 'processing', updated_at: new Date() });
 }
@@ -179,6 +189,8 @@ module.exports = {
   belongsToIdentity,
   insertDesign,
   listPending,
+  listMine,
+  countMine,
   markProcessing,
   saveResult,
   markFailed,
