@@ -5,7 +5,9 @@
   "description": "Express MVC API server for the white-label e-commerce template (docs/architecture.md). Standalone repo — paired with a separate frontend repo, not an npm workspace.",
   "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon src/server.js",
+    "dev": "node scripts/dev-with-stripe.js",
+    "dev:live": "node scripts/dev-with-stripe.js --live",
+    "dev:no-stripe": "nodemon src/server.js",
     "start": "node src/server.js",
     "migrate": "knex --knexfile migrations/knexfile.js migrate:latest",
     "migrate:rollback": "knex --knexfile migrations/knexfile.js migrate:rollback",
@@ -34,6 +36,7 @@
     "mysql2": "^3.11.0",
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.19.1",
+    "stripe": "^18.0.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

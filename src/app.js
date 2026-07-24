@@ -49,6 +49,10 @@ app.use(
   })
 );
 
+// Stripe webhook signature verification needs the exact raw request bytes,
+// so this path gets express.raw() instead of express.json() — mounted before
+// the global JSON parser below so it never JSON-parses this body first.
+app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
 app.use(generalLimiter);

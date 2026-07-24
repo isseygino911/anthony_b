@@ -7,9 +7,17 @@ const HEADER_NAME = 'x-csrf-token';
 const MAX_AGE_MS = 1000 * 60 * 60 * 24 * 365;
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-// Routes that establish auth itself and are explicitly exempted from CSRF
-// per architecture.md §4 header note.
-const EXEMPT_PATHS = new Set(['/api/auth/register', '/api/auth/login', '/api/auth/google/callback']);
+// Routes that establish auth itself, or are called by a third party instead
+// of our own frontend, and are explicitly exempted from CSRF per
+// architecture.md §4 header note. The Stripe webhook is verified instead via
+// its Stripe-Signature header (see payment.service.js) — Stripe never has
+// our CSRF cookie to echo back.
+const EXEMPT_PATHS = new Set([
+  '/api/auth/register',
+  '/api/auth/login',
+  '/api/auth/google/callback',
+  '/api/webhooks/stripe',
+]);
 
 function generateToken() {
   return crypto.createHmac('sha256', config.csrfSecret).update(crypto.randomBytes(32)).digest('hex');

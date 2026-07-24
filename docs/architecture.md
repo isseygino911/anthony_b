@@ -55,7 +55,7 @@ client only ever displays totals the server returns.
 
 Everything else defaults to the plan's stack: React + shadcn/ui + Tailwind,
 Express MVC, MySQL, Helmet, rate limiting, Google OAuth + email/password,
-Stripe deferred, Caddy + PM2.
+Stripe (Payment Intents + embedded Payment Element, §7.3), Caddy + PM2.
 
 ---
 
@@ -322,6 +322,8 @@ OAuth callback require the CSRF header to match the CSRF cookie.
 | GET | `/api/admin/orders` | Admin | query: `status, page, pageSize, search` | `200 {items: [OrderSummary], total}` |
 | GET | `/api/admin/orders/:id` | Admin | — | `200 {Order with items[], auditLog[]}` |
 | PATCH | `/api/admin/orders/:id` | Admin | `{type: 'discount'|'refund'|'shipping_change'|'manual_adjustment'|'status_change', amount?, newStatus?, reason?}` | `200 {Order, auditLogEntry}` — see §7 for derivation rules |
+| POST | `/api/orders/:id/create-payment-intent` | Customer (owner or admin) | — | `200 {clientSecret}` — see §7.3 |
+| POST | `/api/webhooks/stripe` | Stripe (signature-verified, no cookie auth) | raw Stripe event body + `Stripe-Signature` header | `200 {received: true}` — see §7.3 |
 
 ### 4.8 Site Theme
 | Method | Path | Auth | Request | Response |
@@ -547,17 +549,43 @@ total            = subtotal + adjustment_total
   order is what crossed it), insert one `notifications` row
   (`type='low_stock', product_id, message, is_read=false`).
 
-### 7.3 Checkout status seam for Stripe (deferred)
+### 7.3 Stripe integration
 
-- `POST /api/orders` creates the order with `status = 'pending_payment'`
-  immediately after cart snapshot + stock decrement — no payment step occurs
-  today.
-- `orders.status` enum includes `'processing'` as the next state a future
-  Stripe webhook handler would transition into after a successful charge.
-  The seam: a not-yet-implemented `POST /api/orders/:id/confirm-payment`
-  (or a Stripe webhook receiver) would be the only place that flips
-  `pending_payment -> processing`. No such route exists yet; this is
-  intentionally the stopping point per plan §1/§10.
+- Uses the Payment Intents API directly (not legacy Sources/Charges, not
+  Stripe Checkout redirect) — the frontend renders Stripe's embedded Payment
+  Element against the `clientSecret` returned below.
+- `POST /api/orders` still creates the order with `status = 'pending_payment'`
+  immediately after cart snapshot + stock decrement, unchanged — no Stripe
+  call happens at order-creation time.
+- `POST /api/orders/:id/create-payment-intent` (owner or admin, order must
+  currently be `pending_payment`, else `400`): creates a Stripe PaymentIntent
+  for `Math.round(order.total * 100)` cents, currency `usd` (only currency in
+  use; no per-tenant currency config exists), `metadata.order_id`. Stores
+  `orders.stripe_payment_intent_id`. If the order already has one and it's
+  still in a reusable state (`requires_payment_method`,
+  `requires_confirmation`, `requires_action`), that PaymentIntent's amount is
+  updated and reused instead of creating a duplicate — covers checkout-page
+  reloads. Returns only `{clientSecret}`, never the full PaymentIntent or any
+  secret key.
+- `POST /api/webhooks/stripe`: no cookie auth — Stripe calls this directly.
+  The `Stripe-Signature` header verified against `STRIPE_WEBHOOK_SECRET` via
+  `stripe.webhooks.constructEvent` is the entire security boundary; the route
+  is mounted with `express.raw()` ahead of the global `express.json()` (see
+  `app.js`) so the exact signed bytes reach verification unmodified. Always
+  returns `200` once signature-verified, including for event types it
+  doesn't act on (avoids Stripe retry storms).
+  - `payment_intent.succeeded`: looks the order up by
+    `stripe_payment_intent_id`; if its status is currently `pending_payment`,
+    transitions it to `processing` and writes an `order_audit_log` row
+    (`field_changed: 'status'`, `actor_user_id: NULL` for system-initiated,
+    reason `'Stripe payment succeeded'`) in one transaction. **This is the
+    only code path in the system allowed to make the
+    `pending_payment -> processing` transition** — `create-payment-intent`
+    never does it, and there is no other route that does.
+  - `payment_intent.payment_failed`: no status change — order stays
+    `pending_payment` so the customer can retry.
+- Refund-to-Stripe reconciliation remains out of scope (§7.1's `refund`
+  adjustment type stays disabled) — this integration only takes payment.
 
 ---
 
@@ -689,11 +717,13 @@ the cart-merge upsert logic in §6 straightforward; `INDEX (product_id)`.
 | subtotal | DECIMAL(10,2) | NOT NULL, derived (§7.1) |
 | adjustment_total | DECIMAL(10,2) | NOT NULL DEFAULT 0, derived (§7.1) |
 | total | DECIMAL(10,2) | NOT NULL, derived (§7.1) |
+| stripe_payment_intent_id | VARCHAR(255) | NULLABLE — set by `POST /api/orders/:id/create-payment-intent` (§7.3) |
 | created_at | DATETIME | NOT NULL |
 | updated_at | DATETIME | NOT NULL |
 
 Indexes: `INDEX (user_id)`, `INDEX (status)`, `INDEX (created_at)` (revenue
-dashboard range queries).
+dashboard range queries), `INDEX (stripe_payment_intent_id)` (webhook lookup,
+§7.3).
 
 ### `order_items`
 | Column | Type | Notes |
@@ -805,14 +835,12 @@ becomes a concern; not needed at current scale, so not built now).
 
 ## 11. Open Items / Deferred
 
-- **Stripe integration**: entirely deferred per plan §1/§7/§10. This
-  architecture stops at `orders.status = 'pending_payment'` and defines
-  `'processing'` as the next enum value a future payment-confirmation
-  endpoint/webhook would set. No Stripe SDK, keys, webhook route, or refund
-  API call is designed here. When undertaken, it will need: a webhook
-  receiver route, idempotency handling, and wiring the `order_audit_log`
-  money-adjustment path (§7.1) to actual Stripe refund/charge calls (plan
-  §7, last bullet).
+- **Stripe integration**: payment-taking is implemented (§7.3) — Payment
+  Intents, embedded Payment Element, webhook-driven
+  `pending_payment -> processing`. Still deferred: wiring the
+  `order_audit_log` money-adjustment path (§7.1) to actual Stripe
+  refund/charge calls (plan §7, last bullet) — the `refund` adjustment type
+  stays disabled until that's undertaken.
 - **S3 bucket availability untested**: the S3 integration points
   (`server/src/config/s3.js`, `upload.service.js`, product-image and
   logo-upload endpoints) are designed against the standard

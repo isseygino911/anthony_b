@@ -159,3 +159,6 @@ Never commit the real `.env` file.
   `Caddyfile` for the exact assumed layout and adjust as needed.
 
 Actual VPS provisioning, domain/DNS, and TLS setup are not done by this repo.
+
+admin@demo-store.test
+DemoAdmin123!

@@ -53,6 +53,9 @@ const config = {
   clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   csrfSecret: process.env.CSRF_SECRET,
   defaultLowStockThreshold: Number(process.env.DEFAULT_LOW_STOCK_THRESHOLD) || 5,
+
+  stripeSecretKey: required('STRIPE_SECRET_KEY'),
+  stripeWebhookSecret: required('STRIPE_WEBHOOK_SECRET'),
 };
 
 module.exports = config;

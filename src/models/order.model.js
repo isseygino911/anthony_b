@@ -28,8 +28,16 @@ function updateStatus(orderId, status, trx) {
   return trx(TABLE).where({ id: orderId }).update({ status, updated_at: new Date() });
 }
 
+function updateStripePaymentIntentId(orderId, stripePaymentIntentId, trx = db) {
+  return trx(TABLE).where({ id: orderId }).update({ stripe_payment_intent_id: stripePaymentIntentId, updated_at: new Date() });
+}
+
 function findById(id, trx = db) {
   return trx(TABLE).where({ id }).first();
+}
+
+function findByStripePaymentIntentId(stripePaymentIntentId, trx = db) {
+  return trx(TABLE).where({ stripe_payment_intent_id: stripePaymentIntentId }).first();
 }
 
 function listForUser(userId, { limit, offset }, trx = db) {
@@ -100,7 +108,9 @@ module.exports = {
   insertOrder,
   updateTotals,
   updateStatus,
+  updateStripePaymentIntentId,
   findById,
+  findByStripePaymentIntentId,
   listForUser,
   countForUser,
   listAdmin,
