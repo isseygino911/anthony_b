@@ -1,9 +1,12 @@
+const PDFDocument = require('pdfkit');
 const db = require('../config/db');
 const cartModel = require('../models/cart.model');
 const productModel = require('../models/product.model');
 const orderModel = require('../models/order.model');
 const orderItemModel = require('../models/orderItem.model');
 const orderAuditLogModel = require('../models/orderAuditLog.model');
+const userModel = require('../models/user.model');
+const siteThemeModel = require('../models/siteTheme.model');
 const notificationService = require('./notification.service');
 const ApiError = require('../utils/apiError');
 
@@ -177,6 +180,12 @@ async function applyAdjustment(orderId, { type, amount, newStatus, reason }, act
         trx
       );
     } else {
+      // Temporarily disabled: unlike discount, nothing normalizes a refund's
+      // sign, so a positive amount silently increases the total instead of
+      // reducing it. Re-enable once that's fixed (mirror discount's
+      // -Math.abs() normalization below).
+      if (type === 'refund') throw ApiError.badRequest('Refund adjustments are temporarily disabled');
+
       if (typeof amount !== 'number') throw ApiError.badRequest('amount is required for this adjustment type');
       const label = ADJUSTMENT_LABELS[type];
       if (!label) throw ApiError.badRequest('Unknown adjustment type');
@@ -204,6 +213,123 @@ async function applyAdjustment(orderId, { type, amount, newStatus, reason }, act
   });
 }
 
+function formatMoney(amount) {
+  return `$${Number(amount).toFixed(2)}`;
+}
+
+// Builds (but does not end/pipe) a PDFDocument invoice for a delivered order.
+// Returns the stream so the controller owns piping it to the HTTP response
+// and calling .end() — keeps this function pure/testable.
+async function generateInvoice(orderId) {
+  const order = await orderModel.findById(orderId);
+  if (!order) throw ApiError.notFound('Order not found');
+
+  // architecture.md-style defense-in-depth: this is a real server-side guard,
+  // not just a UI gate (mirrors the discount sign-normalization convention —
+  // business rules are enforced here even though the admin UI also hides the
+  // button before this point).
+  if (order.status !== 'delivered') {
+    throw ApiError.badRequest('Invoice is only available once the order is delivered');
+  }
+
+  const [items, customer, theme] = await Promise.all([
+    orderItemModel.listByOrderId(orderId),
+    userModel.findById(order.user_id),
+    siteThemeModel.getRow(),
+  ]);
+
+  const shippingAddress =
+    typeof order.shipping_address === 'string'
+      ? JSON.parse(order.shipping_address)
+      : order.shipping_address;
+
+  const subtotal = Number(order.subtotal);
+  const adjustmentTotal = Number(order.adjustment_total);
+  const taxRatePercent = Number(theme?.tax_rate_percent) || 0;
+  // Tax is computed on what the customer actually ends up paying after
+  // discounts/adjustments — same number as order.total.
+  const taxableAmount = subtotal + adjustmentTotal;
+  const taxAmount = Math.round(taxableAmount * (taxRatePercent / 100) * 100) / 100;
+  const invoiceTotal = taxableAmount + taxAmount;
+
+  const doc = new PDFDocument({ margin: 50 });
+
+  const brandName = theme?.brand_name || 'Invoice';
+
+  doc.fontSize(20).text(brandName, { continued: false });
+  doc.fontSize(14).text('INVOICE', { align: 'right' });
+  doc.moveDown();
+
+  doc.fontSize(10);
+  doc.text(`Order #${order.id}`);
+  doc.text(`Date: ${new Date(order.created_at).toLocaleDateString()}`);
+  doc.moveDown();
+
+  doc.text(`Customer: ${customer?.name ?? 'N/A'}`);
+  doc.text(`Email: ${customer?.email ?? 'N/A'}`);
+  doc.moveDown();
+
+  if (shippingAddress) {
+    doc.text('Shipping address:');
+    doc.text(shippingAddress.recipient_name ?? '');
+    doc.text(
+      `${shippingAddress.line1 ?? ''}${shippingAddress.line2 ? `, ${shippingAddress.line2}` : ''}`
+    );
+    doc.text(
+      `${shippingAddress.city ?? ''}, ${shippingAddress.region ?? ''} ${shippingAddress.postal_code ?? ''}`
+    );
+    doc.text(shippingAddress.country ?? '');
+    doc.moveDown();
+  }
+
+  // Line items table.
+  const tableTop = doc.y + 10;
+  const col = { label: 50, qty: 300, unit: 360, total: 450 };
+  doc.font('Helvetica-Bold');
+  doc.text('Item', col.label, tableTop);
+  doc.text('Qty', col.qty, tableTop);
+  doc.text('Unit', col.unit, tableTop);
+  doc.text('Total', col.total, tableTop);
+  doc.font('Helvetica');
+  doc.moveDown(0.5);
+  doc.moveTo(col.label, doc.y).lineTo(550, doc.y).stroke();
+  doc.moveDown(0.5);
+
+  items.forEach((item) => {
+    const y = doc.y;
+    const lineTotal = item.unit_price !== null ? Number(item.unit_price) * item.quantity : Number(item.amount);
+    doc.text(item.label, col.label, y, { width: 240 });
+    doc.text(item.quantity !== null ? String(item.quantity) : '-', col.qty, y);
+    doc.text(item.unit_price !== null ? formatMoney(item.unit_price) : '-', col.unit, y);
+    doc.text(formatMoney(lineTotal), col.total, y);
+    doc.moveDown();
+  });
+
+  doc.moveDown(0.5);
+  doc.moveTo(col.label, doc.y).lineTo(550, doc.y).stroke();
+  doc.moveDown(0.5);
+
+  // Totals block, right-aligned. Each row's label/value are drawn at a fixed
+  // y so they line up, then the cursor advances a fixed line height.
+  const totalsX = 360;
+  const lineHeight = 16;
+  function totalsRow(label, value, bold) {
+    if (bold) doc.font('Helvetica-Bold');
+    const y = doc.y;
+    doc.text(label, totalsX, y, { width: 100 });
+    doc.text(value, col.total, y);
+    doc.y = y + lineHeight;
+    if (bold) doc.font('Helvetica');
+  }
+  totalsRow('Subtotal', formatMoney(subtotal));
+  totalsRow('Adjustments', formatMoney(adjustmentTotal));
+  totalsRow(`Tax (${taxRatePercent.toFixed(2)}%)`, formatMoney(taxAmount));
+  doc.moveDown(0.3);
+  totalsRow('Total', formatMoney(invoiceTotal), true);
+
+  return doc;
+}
+
 module.exports = {
   createOrder,
   getOrderForRequester,
@@ -211,4 +337,5 @@ module.exports = {
   listOrdersAdmin,
   getOrderAdmin,
   applyAdjustment,
+  generateInvoice,
 };

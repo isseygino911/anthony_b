@@ -42,4 +42,21 @@ const patchOrderAdmin = asyncHandler(async (req, res) => {
   res.status(200).json(result);
 });
 
-module.exports = { createOrder, listMyOrders, getMyOrder, listOrdersAdmin, getOrderAdmin, patchOrderAdmin };
+const downloadInvoice = asyncHandler(async (req, res) => {
+  const orderId = Number(req.params.id);
+  const doc = await orderService.generateInvoice(orderId);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="invoice-${orderId}.pdf"`);
+  doc.pipe(res);
+  doc.end();
+});
+
+module.exports = {
+  createOrder,
+  listMyOrders,
+  getMyOrder,
+  listOrdersAdmin,
+  getOrderAdmin,
+  patchOrderAdmin,
+  downloadInvoice,
+};

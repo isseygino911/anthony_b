@@ -22,6 +22,7 @@ exports.seed = async function seed(knex) {
     }),
     social_links: JSON.stringify({ instagram: '', pinterest: '', behance: '' }),
     default_mode: 'auto',
+    tax_rate_percent: 0,
     updated_at: knex.fn.now(),
   });
 };

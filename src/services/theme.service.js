@@ -32,6 +32,7 @@ async function getTheme() {
     section_styles: parseJsonColumn(row.section_styles),
     social_links: parseJsonColumn(row.social_links),
     default_mode: row.default_mode,
+    tax_rate_percent: Number(row.tax_rate_percent),
   };
 }
 
@@ -45,6 +46,14 @@ function validateThemeInput(data) {
       if (!colors || !colors.primary || !colors.secondary) {
         throw ApiError.badRequest('custom_colors {primary, secondary} required when palette_id is custom');
       }
+    }
+  }
+  if (data.tax_rate_percent !== undefined) {
+    const rate = Number(data.tax_rate_percent);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      throw ApiError.badRequest('tax_rate_percent must be a number between 0 and 100', {
+        tax_rate_percent: data.tax_rate_percent,
+      });
     }
   }
 }
@@ -70,6 +79,9 @@ async function updateTheme(data) {
     patch.social_links = data.social_links ? JSON.stringify(data.social_links) : null;
   }
   if (data.default_mode !== undefined) patch.default_mode = data.default_mode;
+  if (data.tax_rate_percent !== undefined) {
+    patch.tax_rate_percent = Math.round(Number(data.tax_rate_percent) * 100) / 100;
+  }
 
   const row = await siteThemeModel.upsertRow(patch);
   return {

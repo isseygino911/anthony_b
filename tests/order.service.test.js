@@ -167,8 +167,22 @@ describe('order.service — total derivation (architecture.md §7.1)', () => {
     const order = await orderService.createOrder(7, { line1: 'x', country: 'US' });
 
     await expect(
-      orderService.applyAdjustment(order.id, { type: 'refund' }, 1)
+      orderService.applyAdjustment(order.id, { type: 'shipping_change' }, 1)
     ).rejects.toThrow('amount is required');
+  });
+
+  // Refunds are temporarily disabled (see order.service.js) — unlike
+  // discount, nothing normalizes a refund's sign, so a positive amount would
+  // silently increase the total instead of reducing it. Re-enable this type
+  // once that's fixed.
+  it('rejects a refund adjustment regardless of amount, since refunds are temporarily disabled', async () => {
+    const productId = await seedProduct({ price: 30, stock_quantity: 10 });
+    await seedCartItem(9, productId, 1);
+    const order = await orderService.createOrder(9, { line1: 'x', country: 'US' });
+
+    await expect(
+      orderService.applyAdjustment(order.id, { type: 'refund', amount: -10 }, 1)
+    ).rejects.toThrow('temporarily disabled');
   });
 
   it('rejects an unknown adjustment type', async () => {
@@ -216,5 +230,22 @@ describe('order.service — stock decrement + low-stock notification (architectu
 
     const notifications = await db('notifications').where({ product_id: productId });
     expect(notifications).toHaveLength(0); // oldQuantity (4) was not > threshold (5), so this isn't "the crossing order"
+  });
+});
+
+describe('order.service — generateInvoice guard', () => {
+  it('rejects generating an invoice for an order that is not yet delivered', async () => {
+    const productId = await seedProduct({ price: 20, stock_quantity: 10 });
+    await seedCartItem(14, productId, 1);
+    const order = await orderService.createOrder(14, { line1: 'x', country: 'US' });
+    expect(order.status).toBe('pending_payment');
+
+    await expect(orderService.generateInvoice(order.id)).rejects.toThrow(
+      'Invoice is only available once the order is delivered'
+    );
+  });
+
+  it('rejects generating an invoice for a non-existent order', async () => {
+    await expect(orderService.generateInvoice(999999)).rejects.toThrow('Order not found');
   });
 });
