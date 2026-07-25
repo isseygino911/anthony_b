@@ -42,6 +42,7 @@ async function applySchema(db) {
     t.decimal('tax_rate_percent', 5, 2).defaultTo(0);
     t.decimal('tax_amount', 10, 2).defaultTo(0);
     t.decimal('total', 10, 2);
+    t.string('stripe_payment_intent_id');
     t.datetime('created_at');
     t.datetime('updated_at');
   });

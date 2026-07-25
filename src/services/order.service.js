@@ -13,7 +13,6 @@ const ApiError = require('../utils/apiError');
 
 const ADJUSTMENT_LABELS = {
   discount: 'Manual discount',
-  refund: 'Refund',
   shipping_change: 'Shipping adjustment',
   manual_adjustment: 'Manual adjustment',
 };
@@ -221,14 +220,58 @@ async function getOrderAdmin(orderId) {
   return { ...shaped, auditLog };
 }
 
+// Admin-triggered full refund: issues the actual Stripe refund against the
+// order's PaymentIntent first, and only marks the order 'refunded' once
+// Stripe confirms it — so the DB never says "refunded" for money Stripe
+// hasn't actually returned.
+async function refundOrder(order, reason, actorUserId) {
+  if (order.status === 'pending_payment') {
+    throw ApiError.badRequest('Order has not been paid — nothing to refund');
+  }
+  if (order.status === 'refunded') {
+    throw ApiError.badRequest('Order has already been refunded');
+  }
+  if (!order.stripe_payment_intent_id) {
+    throw ApiError.badRequest('Order has no associated payment to refund');
+  }
+
+  const stripe = getStripeClient();
+  await stripe.refunds.create({ payment_intent: order.stripe_payment_intent_id });
+
+  return db.transaction(async (trx) => {
+    await orderModel.updateStatus(order.id, 'refunded', trx);
+    await orderAuditLogModel.insertEntry(
+      {
+        orderId: order.id,
+        actorUserId,
+        fieldChanged: 'status',
+        oldValue: order.status,
+        newValue: 'refunded',
+        reason: reason || 'Refunded by admin',
+      },
+      trx
+    );
+    const auditLogEntry = (await orderAuditLogModel.listByOrderId(order.id, trx)).at(-1);
+    const shaped = await shapeOrder(order.id, trx);
+    return { order: shaped, auditLogEntry };
+  });
+}
+
 // architecture.md §7.1 — PATCH /api/admin/orders/:id
 async function applyAdjustment(orderId, { type, amount, newStatus, reason }, actorUserId) {
   const order = await orderModel.findById(orderId);
   if (!order) throw ApiError.notFound('Order not found');
 
+  if (type === 'refund') {
+    return refundOrder(order, reason, actorUserId);
+  }
+
   return db.transaction(async (trx) => {
     if (type === 'status_change') {
       if (!newStatus) throw ApiError.badRequest('newStatus is required for status_change');
+      if (newStatus === 'refunded') {
+        throw ApiError.badRequest('Use the refund adjustment to refund an order — this issues the actual Stripe refund, not just a status label');
+      }
       const oldValue = order.status;
       await orderModel.updateStatus(orderId, newStatus, trx);
       await orderAuditLogModel.insertEntry(
@@ -243,12 +286,6 @@ async function applyAdjustment(orderId, { type, amount, newStatus, reason }, act
         trx
       );
     } else {
-      // Temporarily disabled: unlike discount, nothing normalizes a refund's
-      // sign, so a positive amount silently increases the total instead of
-      // reducing it. Re-enable once that's fixed (mirror discount's
-      // -Math.abs() normalization below).
-      if (type === 'refund') throw ApiError.badRequest('Refund adjustments are temporarily disabled');
-
       if (typeof amount !== 'number') throw ApiError.badRequest('amount is required for this adjustment type');
       const label = ADJUSTMENT_LABELS[type];
       if (!label) throw ApiError.badRequest('Unknown adjustment type');

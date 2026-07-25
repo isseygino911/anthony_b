@@ -12,12 +12,14 @@
 // the mock registered. See tests/helpers/isolateDb.js for the safe
 // replacement (pre-populates Node's own require.cache), which was verified
 // end-to-end before use here.
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 
 const { isolateDb } = require('./helpers/isolateDb');
+const { isolateStripe } = require('./helpers/isolateStripe');
 const { applySchema } = require('./helpers/testDb');
 
 const db = isolateDb(); // must happen before requiring order.service below
+const stripe = isolateStripe(vi); // ditto
 const orderService = require('../src/services/order.service');
 
 const TABLES = [
@@ -172,18 +174,43 @@ describe('order.service — total derivation (architecture.md §7.1)', () => {
     ).rejects.toThrow('amount is required');
   });
 
-  // Refunds are temporarily disabled (see order.service.js) — unlike
-  // discount, nothing normalizes a refund's sign, so a positive amount would
-  // silently increase the total instead of reducing it. Re-enable this type
-  // once that's fixed.
-  it('rejects a refund adjustment regardless of amount, since refunds are temporarily disabled', async () => {
+  it('refunds a paid order via Stripe and sets status to refunded', async () => {
+    const productId = await seedProduct({ price: 30, stock_quantity: 10 });
+    await seedCartItem(11, productId, 1);
+    const order = await orderService.createOrder(11, { line1: 'x', country: 'US' });
+    await db('orders')
+      .where({ id: order.id })
+      .update({ status: 'processing', stripe_payment_intent_id: 'pi_test_123' });
+
+    const { order: refunded, auditLogEntry } = await orderService.applyAdjustment(
+      order.id,
+      { type: 'refund', reason: 'customer request' },
+      1
+    );
+
+    expect(stripe.refunds.create).toHaveBeenCalledWith({ payment_intent: 'pi_test_123' });
+    expect(refunded.status).toBe('refunded');
+    expect(auditLogEntry).toMatchObject({ field_changed: 'status', old_value: 'processing', new_value: 'refunded' });
+  });
+
+  it('rejects a refund on an order that has never been paid', async () => {
     const productId = await seedProduct({ price: 30, stock_quantity: 10 });
     await seedCartItem(9, productId, 1);
     const order = await orderService.createOrder(9, { line1: 'x', country: 'US' });
 
     await expect(
-      orderService.applyAdjustment(order.id, { type: 'refund', amount: -10 }, 1)
-    ).rejects.toThrow('temporarily disabled');
+      orderService.applyAdjustment(order.id, { type: 'refund' }, 1)
+    ).rejects.toThrow('nothing to refund');
+  });
+
+  it('rejects setting status directly to refunded via status_change', async () => {
+    const productId = await seedProduct({ price: 30, stock_quantity: 10 });
+    await seedCartItem(10, productId, 1);
+    const order = await orderService.createOrder(10, { line1: 'x', country: 'US' });
+
+    await expect(
+      orderService.applyAdjustment(order.id, { type: 'status_change', newStatus: 'refunded' }, 1)
+    ).rejects.toThrow('Use the refund adjustment');
   });
 
   it('rejects an unknown adjustment type', async () => {
