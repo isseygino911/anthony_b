@@ -52,6 +52,11 @@ function constructWebhookEvent(rawBody, signature) {
   try {
     return stripe.webhooks.constructEvent(rawBody, signature, config.stripeWebhookSecret);
   } catch (err) {
+    // Almost always a mismatched STRIPE_WEBHOOK_SECRET (stale dev secret, or
+    // Stripe Dashboard endpoint pointing at a different secret than what's
+    // deployed) — logged here because this used to fail silently, leaving
+    // orders stuck at pending_payment with no visible cause.
+    console.error('[stripe-webhook] signature verification failed:', err.message);
     throw ApiError.badRequest('Invalid Stripe webhook signature');
   }
 }
@@ -61,8 +66,16 @@ function constructWebhookEvent(rawBody, signature) {
 async function handlePaymentIntentSucceeded(paymentIntent) {
   await db.transaction(async (trx) => {
     const order = await orderModel.findByStripePaymentIntentId(paymentIntent.id, trx);
-    if (!order) return;
-    if (order.status !== 'pending_payment') return;
+    if (!order) {
+      console.error(`[stripe-webhook] no order found for payment_intent ${paymentIntent.id}`);
+      return;
+    }
+    if (order.status !== 'pending_payment') {
+      console.error(
+        `[stripe-webhook] order ${order.id} already left pending_payment (status=${order.status}) — ignoring duplicate/late payment_intent.succeeded for ${paymentIntent.id}`
+      );
+      return;
+    }
 
     await orderModel.updateStatus(order.id, 'processing', trx);
     await orderAuditLogModel.insertEntry(
@@ -89,6 +102,7 @@ async function handleWebhookEvent(event) {
       // beyond acknowledging receipt.
       break;
     default:
+      console.log(`[stripe-webhook] unhandled event type: ${event.type}`);
       break;
   }
 }

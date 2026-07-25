@@ -41,6 +41,28 @@ function listPending(limit = 10, trx = db) {
   return trx(TABLE).where({ status: 'pending' }).orderBy('updated_at', 'asc').limit(limit);
 }
 
+// Rows left at 'processing' by a worker that died mid-processRow (killed,
+// OOM, crash) would otherwise be stuck forever — listPending() only ever
+// re-picks up 'pending' rows. Reclaiming anything past a generous timeout
+// (far longer than a normal Gemini call) back to 'pending' lets the next
+// tick retry it through the normal attempts/markFailed path.
+const STUCK_PROCESSING_TIMEOUT_MINUTES = 5;
+
+function reclaimStuckProcessing(trx = db) {
+  return trx(TABLE)
+    .where({ status: 'processing' })
+    .andWhere('updated_at', '<', trx.raw(`NOW() - INTERVAL ${STUCK_PROCESSING_TIMEOUT_MINUTES} MINUTE`))
+    .update({ status: 'pending', updated_at: new Date() });
+}
+
+// A user may only have one design generating at a time (createDesign /
+// regenerate both enforce this) — used both to block a second concurrent
+// generation and to let the frontend find/reattach to an in-progress design
+// after a refresh or on a fresh page load.
+function findActiveByUserId(userId, trx = db) {
+  return trx(TABLE).whereIn('status', ['pending', 'processing']).andWhere({ user_id: userId }).first();
+}
+
 // Customer-facing "My Designs" list — every design the user has ever
 // generated, regardless of status, newest first.
 function listMine(userId, { limit, offset }, trx = db) {
@@ -189,6 +211,8 @@ module.exports = {
   belongsToIdentity,
   insertDesign,
   listPending,
+  reclaimStuckProcessing,
+  findActiveByUserId,
   listMine,
   countMine,
   markProcessing,

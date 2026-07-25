@@ -3,8 +3,14 @@
 // and served as static assets by Caddy (see Caddyfile) on the same VPS. It
 // has no PM2 entry here.
 //
-// The main Express API server (src/server.js) is Docker-managed (see
-// Dockerfile / docker-compose.yml) and is NOT defined here.
+// The main Express API server (src/server.js) and the neon-design worker
+// (scripts/neon-design-worker.js) are both Docker-managed (see
+// Dockerfile / docker-compose.yml, services `server` and `neon-worker`) and
+// are NOT defined here. The neon worker used to run under PM2 but was moved
+// into Docker Compose so it starts/restarts via the same `docker compose up`
+// flow as everything else, instead of relying on a separate manual PM2 step
+// that was easy to forget (this caused designs to get stuck in "pending"
+// indefinitely with no indication the worker wasn't running at all).
 //
 // scripts/seo-geo-worker.js calls Gemini directly (GEMINI_API_KEY) — no CLI
 // subprocess, no OAuth session, so it has no bare-metal-only requirement
@@ -24,25 +30,6 @@ module.exports = {
       // scripts/seo-geo-worker.js. Requires GEMINI_API_KEY in .env.
       name: 'anthony-ecom-seo-worker',
       script: './scripts/seo-geo-worker.js',
-      cwd: __dirname,
-      instances: 1,
-      exec_mode: 'fork',
-      watch: false,
-      autorestart: true,
-      max_restarts: 10,
-      restart_delay: 3000,
-      env: {
-        NODE_ENV: 'production',
-      },
-    },
-    {
-      // Polls custom_neon_designs for designs queued by
-      // customNeonDesign.service.js and calls Gemini's image model to
-      // generate a photorealistic neon-sign preview — see
-      // scripts/neon-design-worker.js. Requires GEMINI_API_KEY + AWS S3 env
-      // vars in .env.
-      name: 'anthony-ecom-neon-worker',
-      script: './scripts/neon-design-worker.js',
       cwd: __dirname,
       instances: 1,
       exec_mode: 'fork',

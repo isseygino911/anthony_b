@@ -36,6 +36,11 @@ const getDesign = asyncHandler(async (req, res) => {
   res.status(200).json(design);
 });
 
+const getActiveDesign = asyncHandler(async (req, res) => {
+  const design = await customNeonDesignService.getActiveDesign(identityFromReq(req));
+  res.status(200).json({ design });
+});
+
 const regenerateDesign = asyncHandler(async (req, res) => {
   const { size, neon_color: neonColor } = req.body;
   const design = await customNeonDesignService.regenerate(Number(req.params.id), identityFromReq(req), {
@@ -90,6 +95,7 @@ const listUsageAdmin = asyncHandler(async (req, res) => {
 module.exports = {
   createDesign,
   getDesign,
+  getActiveDesign,
   regenerateDesign,
   confirmDesign,
   listMine,

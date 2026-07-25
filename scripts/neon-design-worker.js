@@ -8,7 +8,9 @@
  *
  * Structurally identical to seo-geo-worker.js: own long-lived process, own
  * poll loop, headless (just GEMINI_API_KEY + AWS creds), so a slow/stuck AI
- * call never affects API request latency.
+ * call never affects API request latency. Each tick's batch is processed
+ * concurrently (Promise.all) rather than serially, so multiple customers'
+ * generations run in parallel instead of queueing behind each other.
  *
  * Usage: node scripts/neon-design-worker.js
  */
@@ -20,7 +22,10 @@ const uploadService = require('../src/services/upload.service');
 const customNeonDesignModel = require('../src/models/customNeonDesign.model');
 
 const POLL_INTERVAL_MS = Number(process.env.NEON_WORKER_POLL_INTERVAL_MS) || 20000;
-const BATCH_SIZE = Number(process.env.NEON_WORKER_BATCH_SIZE) || 3;
+// Batch members are now processed concurrently (see tick()), so this bounds
+// how many customers' generations run in parallel per poll tick rather than
+// how many run serially — raised from the old serial-era default of 3.
+const BATCH_SIZE = Number(process.env.NEON_WORKER_BATCH_SIZE) || 6;
 
 function parsePayload(payload) {
   return typeof payload === 'string' ? JSON.parse(payload) : payload;
@@ -84,18 +89,25 @@ async function tick() {
     console.error('[neon-design-worker] S3 not configured — skipping tick');
     return;
   }
-  const pending = await customNeonDesignModel.listPending(BATCH_SIZE);
-  // eslint-disable-next-line no-restricted-syntax
-  for (const row of pending) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      await processRow(row);
-    } catch (err) {
-      console.error(`[neon-design-worker] design ${row.id} failed`, err);
-      // eslint-disable-next-line no-await-in-loop
-      await customNeonDesignModel.markFailed(row.id, err.message || String(err));
-    }
+
+  const reclaimed = await customNeonDesignModel.reclaimStuckProcessing();
+  if (reclaimed > 0) {
+    console.error(`[neon-design-worker] reclaimed ${reclaimed} design(s) stuck in 'processing'`);
   }
+
+  const pending = await customNeonDesignModel.listPending(BATCH_SIZE);
+  await Promise.all(
+    pending.map(async (row) => {
+      try {
+        await processRow(row);
+      } catch (err) {
+        console.error(`[neon-design-worker] design ${row.id} failed`, err);
+        await customNeonDesignModel.markFailed(row.id, err.message || String(err));
+      }
+    })
+  );
+
+  console.log(`[neon-design-worker] tick complete — processed ${pending.length}`);
 }
 
 let stopped = false;

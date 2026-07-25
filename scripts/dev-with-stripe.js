@@ -1,6 +1,11 @@
 /**
- * Runs `stripe listen` and the API dev server together, so `npm run dev`
- * alone forwards Stripe webhooks to localhost — no separate terminal needed.
+ * Runs `stripe listen`, the API dev server, AND the neon-design worker
+ * together, so `npm run dev` alone is a complete local dev environment — no
+ * separate terminal(s) needed. Previously the worker had to be started
+ * separately (`npm run neon-worker`), which was easy to forget — designs
+ * would sit at status='pending' forever with no error shown anywhere,
+ * looking exactly like a hang. Tying it to this same script means Ctrl+C
+ * here also stops it, instead of leaving it running orphaned.
  *
  * `stripe listen` prints a fresh STRIPE_WEBHOOK_SECRET every time it starts
  * (session-specific, can't be hardcoded in .env), so this script captures
@@ -66,6 +71,20 @@ function startNodemon() {
   return nodemon;
 }
 
+// Own nodemon instance (rather than reusing the server's) so editing
+// scripts/neon-design-worker.js or its dependencies restarts just the
+// worker, not the API server, and vice versa.
+function startNeonWorker() {
+  const worker = spawn('npx', ['nodemon', 'scripts/neon-design-worker.js'], {
+    stdio: 'inherit',
+    shell: true,
+  });
+  worker.on('exit', (code) => {
+    if (code && code !== 0) console.error(`[dev-with-stripe] neon-design-worker exited with code ${code}`);
+  });
+  return worker;
+}
+
 ensureSecretKeyMatchesMode();
 
 const listenArgs = ['listen', '--forward-to', 'localhost:4002/api/webhooks/stripe'];
@@ -76,6 +95,7 @@ const stripeListen = spawn(STRIPE_BIN, listenArgs, { shell: true });
 
 let secretCaptured = false;
 let nodemonProcess = null;
+let neonWorkerProcess = null;
 
 stripeListen.stdout.on('data', (chunk) => process.stdout.write(chunk));
 stripeListen.stderr.on('data', (chunk) => {
@@ -89,6 +109,8 @@ stripeListen.stderr.on('data', (chunk) => {
       updateWebhookSecretInEnv(match[0]);
       console.log(`[dev-with-stripe] wrote fresh STRIPE_WEBHOOK_SECRET to .env, starting server...`);
       nodemonProcess = startNodemon();
+      console.log('[dev-with-stripe] starting neon-design-worker...');
+      neonWorkerProcess = startNeonWorker();
     }
   }
 });
@@ -96,11 +118,13 @@ stripeListen.stderr.on('data', (chunk) => {
 stripeListen.on('exit', (code) => {
   console.log('[dev-with-stripe] stripe listen exited, stopping server...');
   if (nodemonProcess) nodemonProcess.kill();
+  if (neonWorkerProcess) neonWorkerProcess.kill();
   process.exit(code ?? 0);
 });
 
 process.on('SIGINT', () => {
   stripeListen.kill();
   if (nodemonProcess) nodemonProcess.kill();
+  if (neonWorkerProcess) neonWorkerProcess.kill();
   process.exit(0);
 });

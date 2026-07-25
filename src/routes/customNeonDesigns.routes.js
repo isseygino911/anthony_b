@@ -26,6 +26,9 @@ router.post(
 );
 // "My Designs" — every design the caller has ever generated, any status.
 router.get('/custom-neon-designs', customNeonDesignsController.listMine);
+// Must be registered before the :id param route below (same reasoning as
+// showcase above) — "active" would otherwise be parsed as an :id.
+router.get('/custom-neon-designs/active', customNeonDesignsController.getActiveDesign);
 router.get('/custom-neon-designs/:id', customNeonDesignsController.getDesign);
 router.post(
   '/custom-neon-designs/:id/regenerate',

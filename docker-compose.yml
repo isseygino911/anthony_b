@@ -10,3 +10,18 @@ services:
     ports:
       - "4002:4002"
     restart: unless-stopped
+
+  neon-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: anthony-ecom-server:latest
+    container_name: anthony-ecom-neon-worker
+    command: ["node", "scripts/neon-design-worker.js"]
+    env_file:
+      - .env
+    environment:
+      RUN_MIGRATIONS: "false"
+    restart: unless-stopped
+    depends_on:
+      - server

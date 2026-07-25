@@ -62,11 +62,16 @@ async function shapeDesign(row) {
   };
 }
 
+const ACTIVE_GENERATION_ERROR = 'You already have a design generating — please wait for it to finish';
+
 async function createDesign(identity, { designType, file, strokes, text, fontFamily, size, neonColor }) {
   assertIdentity(identity);
   if (!file) throw ApiError.badRequest('No design image uploaded');
   if (!['upload', 'draw', 'text'].includes(designType)) throw ApiError.badRequest('Invalid design_type');
   assertSizeAndColor(size, neonColor);
+
+  const active = await customNeonDesignModel.findActiveByUserId(identity.user.id);
+  if (active) throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
 
   const imageUrl = await uploadService.putFile(file, 'custom-neon/source');
 
@@ -107,12 +112,26 @@ async function getDesign(id, identity) {
   return shapeDesign(row);
 }
 
+// Backs the frontend's "is one of my designs currently generating" check —
+// used to reattach to an in-progress design after a refresh/new tab, and to
+// power the persistent site-wide "generating" indicator.
+async function getActiveDesign(identity) {
+  assertIdentity(identity);
+  const row = await customNeonDesignModel.findActiveByUserId(identity.user.id);
+  return row ? shapeDesign(row) : null;
+}
+
 // Optionally updates size/neonColor before re-queuing, so changing either in
 // the UI and hitting "Re-run AI preview" regenerates with the new values
 // rather than silently keeping the ones from the first generation.
 async function regenerate(id, identity, { size, neonColor } = {}) {
-  await getOwnedDesign(id, identity);
+  const row = await getOwnedDesign(id, identity);
   if (size !== undefined || neonColor !== undefined) assertSizeAndColor(size, neonColor);
+
+  const active = await customNeonDesignModel.findActiveByUserId(identity.user.id);
+  if (active && active.id !== row.id) throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
+  if (row.status === 'pending' || row.status === 'processing') throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
+
   await customNeonDesignModel.requeue(id, { size, neonColor });
   return shapeDesign(await customNeonDesignModel.findById(id));
 }
@@ -277,6 +296,7 @@ module.exports = {
   NEON_COLORS,
   createDesign,
   getDesign,
+  getActiveDesign,
   regenerate,
   confirmDesign,
   listMine,
