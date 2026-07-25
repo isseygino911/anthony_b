@@ -128,8 +128,10 @@ async function regenerate(id, identity, { size, neonColor } = {}) {
   const row = await getOwnedDesign(id, identity);
   if (size !== undefined || neonColor !== undefined) assertSizeAndColor(size, neonColor);
 
-  const active = await customNeonDesignModel.findActiveByUserId(identity.user.id);
-  if (active && active.id !== row.id) throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
+  if (identity.user) {
+    const active = await customNeonDesignModel.findActiveByUserId(identity.user.id);
+    if (active && active.id !== row.id) throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
+  }
   if (row.status === 'pending' || row.status === 'processing') throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
 
   await customNeonDesignModel.requeue(id, { size, neonColor });
@@ -291,9 +293,6 @@ async function getUsageByUser({ page, pageSize }) {
 }
 
 module.exports = {
-  SIZE_PRICES,
-  SIZE_DIMENSIONS,
-  NEON_COLORS,
   createDesign,
   getDesign,
   getActiveDesign,

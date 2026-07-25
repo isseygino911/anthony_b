@@ -39,6 +39,8 @@ async function applySchema(db) {
     t.json('shipping_address');
     t.decimal('subtotal', 10, 2);
     t.decimal('adjustment_total', 10, 2).defaultTo(0);
+    t.decimal('tax_rate_percent', 5, 2).defaultTo(0);
+    t.decimal('tax_amount', 10, 2).defaultTo(0);
     t.decimal('total', 10, 2);
     t.datetime('created_at');
     t.datetime('updated_at');
@@ -95,6 +97,14 @@ async function applySchema(db) {
     t.datetime('created_at');
     t.datetime('updated_at');
   });
+
+  await db.schema.createTable('site_theme', (t) => {
+    t.increments('id');
+    t.string('brand_name');
+    t.decimal('tax_rate_percent', 5, 2).defaultTo(0);
+    t.datetime('updated_at');
+  });
+  await db('site_theme').insert({ id: 1, brand_name: 'Test Brand', tax_rate_percent: 0, updated_at: new Date() });
 
   return db;
 }

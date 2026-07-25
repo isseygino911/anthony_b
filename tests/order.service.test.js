@@ -29,6 +29,7 @@ const TABLES = [
   'custom_neon_designs',
   'product_images',
   'products',
+  'site_theme',
 ];
 
 beforeEach(async () => {
