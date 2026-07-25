@@ -45,6 +45,10 @@ function findById(id, trx = db) {
   return trx(TABLE).where({ id }).first();
 }
 
+function deleteOrder(id, trx) {
+  return trx(TABLE).where({ id }).delete();
+}
+
 function findByStripePaymentIntentId(stripePaymentIntentId, trx = db) {
   return trx(TABLE).where({ stripe_payment_intent_id: stripePaymentIntentId }).first();
 }
@@ -119,6 +123,7 @@ module.exports = {
   updateStatus,
   updateStripePaymentIntentId,
   findById,
+  deleteOrder,
   findByStripePaymentIntentId,
   listForUser,
   countForUser,

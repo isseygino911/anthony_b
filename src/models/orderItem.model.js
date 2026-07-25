@@ -35,6 +35,10 @@ function listByOrderId(orderId, trx = db) {
   return trx(TABLE).where({ order_id: orderId }).orderBy('id', 'asc');
 }
 
+function deleteByOrderId(orderId, trx) {
+  return trx(TABLE).where({ order_id: orderId }).delete();
+}
+
 async function sumLines(orderId, trx) {
   const row = await trx(TABLE)
     .where({ order_id: orderId, item_type: 'line' })
@@ -78,4 +82,12 @@ function getTopProducts({ from, to, metric, limit }, trx = db) {
   return q;
 }
 
-module.exports = { insertLineItems, insertAdjustment, listByOrderId, sumLines, sumAdjustments, getTopProducts };
+module.exports = {
+  insertLineItems,
+  insertAdjustment,
+  listByOrderId,
+  deleteByOrderId,
+  sumLines,
+  sumAdjustments,
+  getTopProducts,
+};

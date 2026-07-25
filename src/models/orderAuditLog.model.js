@@ -18,4 +18,8 @@ function listByOrderId(orderId, trx = db) {
   return trx(TABLE).where({ order_id: orderId }).orderBy('created_at', 'asc');
 }
 
-module.exports = { insertEntry, listByOrderId };
+function deleteByOrderId(orderId, trx) {
+  return trx(TABLE).where({ order_id: orderId }).delete();
+}
+
+module.exports = { insertEntry, listByOrderId, deleteByOrderId };

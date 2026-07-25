@@ -19,6 +19,11 @@ const getMyOrder = asyncHandler(async (req, res) => {
   res.status(200).json(order);
 });
 
+const cancelMyOrder = asyncHandler(async (req, res) => {
+  await orderService.cancelOrder(Number(req.params.id), req.user);
+  res.status(204).end();
+});
+
 const listOrdersAdmin = asyncHandler(async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
@@ -55,6 +60,7 @@ module.exports = {
   createOrder,
   listMyOrders,
   getMyOrder,
+  cancelMyOrder,
   listOrdersAdmin,
   getOrderAdmin,
   patchOrderAdmin,

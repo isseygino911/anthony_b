@@ -8,6 +8,7 @@ const orderAuditLogModel = require('../models/orderAuditLog.model');
 const userModel = require('../models/user.model');
 const siteThemeModel = require('../models/siteTheme.model');
 const notificationService = require('./notification.service');
+const { getStripeClient } = require('../config/stripe');
 const ApiError = require('../utils/apiError');
 
 const ADJUSTMENT_LABELS = {
@@ -124,6 +125,46 @@ async function getOrderForRequester(orderId, requester) {
     throw ApiError.notFound('Order not found');
   }
   return shapeOrder(orderId);
+}
+
+// Customer-facing cancel of their own not-yet-paid order: releases stock,
+// best-effort cancels any Stripe PaymentIntent, then deletes the order and
+// its related rows (order_items, order_audit_log) explicitly rather than
+// relying on DB-level ON DELETE CASCADE.
+async function cancelOrder(orderId, requester) {
+  const order = await orderModel.findById(orderId);
+  if (!order) throw ApiError.notFound('Order not found');
+  if (order.user_id !== requester.id && requester.role !== 'admin') {
+    throw ApiError.notFound('Order not found');
+  }
+  if (order.status !== 'pending_payment') {
+    throw ApiError.badRequest('Only orders awaiting payment can be cancelled');
+  }
+
+  if (order.stripe_payment_intent_id) {
+    try {
+      const stripe = getStripeClient();
+      await stripe.paymentIntents.cancel(order.stripe_payment_intent_id);
+    } catch (err) {
+      // Already canceled/succeeded/never confirmed — fine to ignore and
+      // proceed with deleting the order either way.
+      console.error(`[order-cancel] failed to cancel PaymentIntent for order ${orderId}:`, err.message);
+    }
+  }
+
+  await db.transaction(async (trx) => {
+    const items = await orderItemModel.listByOrderId(orderId, trx);
+    // eslint-disable-next-line no-restricted-syntax
+    for (const item of items) {
+      if (item.item_type === 'line' && item.product_id) {
+        // eslint-disable-next-line no-await-in-loop
+        await productModel.incrementStock(item.product_id, item.quantity, trx);
+      }
+    }
+    await orderAuditLogModel.deleteByOrderId(orderId, trx);
+    await orderItemModel.deleteByOrderId(orderId, trx);
+    await orderModel.deleteOrder(orderId, trx);
+  });
 }
 
 async function listOrdersForUser(userId, { page, pageSize }) {
@@ -355,6 +396,7 @@ async function generateInvoice(orderId) {
 module.exports = {
   createOrder,
   getOrderForRequester,
+  cancelOrder,
   listOrdersForUser,
   listOrdersAdmin,
   getOrderAdmin,

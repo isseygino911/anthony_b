@@ -130,6 +130,10 @@ function decrementStock(id, quantity, trx) {
   return trx(TABLE).where({ id }).decrement('stock_quantity', quantity);
 }
 
+function incrementStock(id, quantity, trx) {
+  return trx(TABLE).where({ id }).increment('stock_quantity', quantity);
+}
+
 module.exports = {
   findAll,
   count,
@@ -143,4 +147,5 @@ module.exports = {
   softDeleteMany,
   setActive,
   decrementStock,
+  incrementStock,
 };

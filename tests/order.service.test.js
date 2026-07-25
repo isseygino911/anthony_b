@@ -234,6 +234,54 @@ describe('order.service — stock decrement + low-stock notification (architectu
   });
 });
 
+describe('order.service — cancelOrder (customer self-cancel of an unpaid order)', () => {
+  it('restores stock and deletes the order + its items for a pending_payment order', async () => {
+    const productId = await seedProduct({ price: 10, stock_quantity: 7 });
+    await seedCartItem(20, productId, 3); // 7 -> 4
+    const order = await orderService.createOrder(20, { line1: 'x', country: 'US' });
+
+    const product = await db('products').where({ id: productId }).first();
+    expect(product.stock_quantity).toBe(4);
+
+    await orderService.cancelOrder(order.id, { id: 20, role: 'customer' });
+
+    const restored = await db('products').where({ id: productId }).first();
+    expect(restored.stock_quantity).toBe(7);
+
+    const deletedOrder = await db('orders').where({ id: order.id }).first();
+    expect(deletedOrder).toBeUndefined();
+    const items = await db('order_items').where({ order_id: order.id });
+    expect(items).toHaveLength(0);
+  });
+
+  it('rejects cancelling another user\'s order', async () => {
+    const productId = await seedProduct({ price: 10, stock_quantity: 10 });
+    await seedCartItem(21, productId, 1);
+    const order = await orderService.createOrder(21, { line1: 'x', country: 'US' });
+
+    await expect(
+      orderService.cancelOrder(order.id, { id: 999, role: 'customer' })
+    ).rejects.toThrow('Order not found');
+  });
+
+  it('rejects cancelling an order that already left pending_payment', async () => {
+    const productId = await seedProduct({ price: 10, stock_quantity: 10 });
+    await seedCartItem(22, productId, 1);
+    const order = await orderService.createOrder(22, { line1: 'x', country: 'US' });
+    await orderService.applyAdjustment(order.id, { type: 'status_change', newStatus: 'processing' }, 1);
+
+    await expect(
+      orderService.cancelOrder(order.id, { id: 22, role: 'customer' })
+    ).rejects.toThrow('Only orders awaiting payment can be cancelled');
+  });
+
+  it('rejects cancelling a non-existent order', async () => {
+    await expect(
+      orderService.cancelOrder(999999, { id: 1, role: 'customer' })
+    ).rejects.toThrow('Order not found');
+  });
+});
+
 describe('order.service — generateInvoice guard', () => {
   it('rejects generating an invoice for an order that is not yet delivered', async () => {
     const productId = await seedProduct({ price: 20, stock_quantity: 10 });
