@@ -18,14 +18,22 @@ const ADJUSTMENT_LABELS = {
 };
 
 // architecture.md §7.1 — the ONLY place order totals are computed. Recomputes
-// and rewrites orders.subtotal/adjustment_total/total from order_items rows,
-// inside the caller's transaction.
+// and rewrites orders.subtotal/adjustment_total/tax_rate_percent/tax_amount/total
+// from order_items rows, inside the caller's transaction. Tax uses whichever
+// rate was already frozen onto the order (set once at createOrder time from
+// site_theme, never re-read live) so a later site-wide rate change doesn't
+// retroactively alter an existing order's tax — only the taxable amount is
+// recomputed here when adjustments change it.
 async function recomputeAndStoreTotals(orderId, trx) {
   const subtotal = await orderItemModel.sumLines(orderId, trx);
   const adjustmentTotal = await orderItemModel.sumAdjustments(orderId, trx);
-  const total = subtotal + adjustmentTotal;
-  await orderModel.updateTotals(orderId, { subtotal, adjustmentTotal, total }, trx);
-  return { subtotal, adjustmentTotal, total };
+  const existing = await orderModel.findById(orderId, trx);
+  const taxRatePercent = Number(existing.tax_rate_percent) || 0;
+  const taxableAmount = subtotal + adjustmentTotal;
+  const taxAmount = Math.round(taxableAmount * (taxRatePercent / 100) * 100) / 100;
+  const total = taxableAmount + taxAmount;
+  await orderModel.updateTotals(orderId, { subtotal, adjustmentTotal, total, taxRatePercent, taxAmount }, trx);
+  return { subtotal, adjustmentTotal, total, taxRatePercent, taxAmount };
 }
 
 async function shapeOrder(orderId, trx = db) {
@@ -43,6 +51,8 @@ async function shapeOrder(orderId, trx = db) {
     shipping_address: shippingAddress,
     subtotal: Number(order.subtotal),
     adjustment_total: Number(order.adjustment_total),
+    tax_rate_percent: Number(order.tax_rate_percent),
+    tax_amount: Number(order.tax_amount),
     total: Number(order.total),
     stripe_payment_intent_id: order.stripe_payment_intent_id,
     created_at: order.created_at,
@@ -67,6 +77,13 @@ async function createOrder(userId, shippingAddress) {
 
   const orderId = await db.transaction(async (trx) => {
     const id = await orderModel.insertOrder({ userId, shippingAddress }, trx);
+
+    // Freeze the tax rate active right now onto the order — recomputeAndStoreTotals
+    // reads it back off the order row rather than site_theme, so later rate
+    // changes never retroactively alter this order's tax.
+    const theme = await siteThemeModel.getRow(trx);
+    const taxRatePercent = Number(theme?.tax_rate_percent) || 0;
+    await orderModel.updateTotals(id, { subtotal: 0, adjustmentTotal: 0, total: 0, taxRatePercent, taxAmount: 0 }, trx);
 
     const lines = cartRows.map((row) => ({
       productId: row.product_id,
@@ -122,6 +139,8 @@ async function listOrdersForUser(userId, { page, pageSize }) {
       status: row.status,
       subtotal: Number(row.subtotal),
       adjustment_total: Number(row.adjustment_total),
+      tax_rate_percent: Number(row.tax_rate_percent),
+      tax_amount: Number(row.tax_amount),
       total: Number(row.total),
       created_at: row.created_at,
     })),
@@ -142,6 +161,8 @@ async function listOrdersAdmin(filters, { page, pageSize }) {
       status: row.status,
       subtotal: Number(row.subtotal),
       adjustment_total: Number(row.adjustment_total),
+      tax_rate_percent: Number(row.tax_rate_percent),
+      tax_amount: Number(row.tax_amount),
       total: Number(row.total),
       created_at: row.created_at,
       customer_name: row.customer_name,
@@ -246,12 +267,12 @@ async function generateInvoice(orderId) {
 
   const subtotal = Number(order.subtotal);
   const adjustmentTotal = Number(order.adjustment_total);
-  const taxRatePercent = Number(theme?.tax_rate_percent) || 0;
-  // Tax is computed on what the customer actually ends up paying after
-  // discounts/adjustments — same number as order.total.
-  const taxableAmount = subtotal + adjustmentTotal;
-  const taxAmount = Math.round(taxableAmount * (taxRatePercent / 100) * 100) / 100;
-  const invoiceTotal = taxableAmount + taxAmount;
+  // Use the rate/amount frozen onto the order at checkout — not the current
+  // site_theme rate, which may have changed since — so the invoice always
+  // matches what the customer actually saw and paid.
+  const taxRatePercent = Number(order.tax_rate_percent) || 0;
+  const taxAmount = Number(order.tax_amount) || 0;
+  const invoiceTotal = Number(order.total);
 
   const doc = new PDFDocument({ margin: 50 });
 

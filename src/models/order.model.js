@@ -12,16 +12,25 @@ async function insertOrder(data, trx) {
     subtotal: 0,
     adjustment_total: 0,
     total: 0,
+    tax_rate_percent: 0,
+    tax_amount: 0,
     created_at: now,
     updated_at: now,
   });
   return id;
 }
 
-function updateTotals(orderId, { subtotal, adjustmentTotal, total }, trx) {
+function updateTotals(orderId, { subtotal, adjustmentTotal, total, taxRatePercent, taxAmount }, trx) {
   return trx(TABLE)
     .where({ id: orderId })
-    .update({ subtotal, adjustment_total: adjustmentTotal, total, updated_at: new Date() });
+    .update({
+      subtotal,
+      adjustment_total: adjustmentTotal,
+      total,
+      tax_rate_percent: taxRatePercent,
+      tax_amount: taxAmount,
+      updated_at: new Date(),
+    });
 }
 
 function updateStatus(orderId, status, trx) {
