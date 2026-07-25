@@ -44,6 +44,7 @@ async function shapeOrder(orderId, trx = db) {
     subtotal: Number(order.subtotal),
     adjustment_total: Number(order.adjustment_total),
     total: Number(order.total),
+    stripe_payment_intent_id: order.stripe_payment_intent_id,
     created_at: order.created_at,
     updated_at: order.updated_at,
     items: items.map((item) => ({
