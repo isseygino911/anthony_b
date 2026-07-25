@@ -102,7 +102,6 @@ async function handleGoogleCallback(code, anonSessionId) {
 
 module.exports = {
   toPublicUser,
-  issueJwt,
   register,
   login,
   getGoogleAuthUrl,

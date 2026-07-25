@@ -18,4 +18,4 @@ async function upsertRow(data, trx = db) {
   return getRow(trx);
 }
 
-module.exports = { getRow, upsertRow, ROW_ID };
+module.exports = { getRow, upsertRow };

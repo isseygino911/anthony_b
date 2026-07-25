@@ -1,7 +1,6 @@
 const db = require('../config/db');
 
 const TABLE = 'users';
-const PUBLIC_COLUMNS = ['id', 'email', 'name', 'role', 'provider', 'created_at'];
 
 function findByEmail(email, trx = db) {
   return trx(TABLE).where({ email }).first();
@@ -35,4 +34,4 @@ async function insertUser(data, trx = db) {
   return findById(id, trx);
 }
 
-module.exports = { findByEmail, findById, findByIds, findByProvider, insertUser, PUBLIC_COLUMNS };
+module.exports = { findByEmail, findById, findByIds, findByProvider, insertUser };
