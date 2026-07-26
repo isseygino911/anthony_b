@@ -29,6 +29,8 @@ const TABLES = [
   'orders',
   'carts',
   'custom_neon_designs',
+  'product_option_choices',
+  'product_option_groups',
   'product_images',
   'products',
   'site_theme',

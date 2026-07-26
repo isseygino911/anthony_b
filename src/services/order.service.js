@@ -85,12 +85,38 @@ async function createOrder(userId, shippingAddress) {
     const taxRatePercent = Number(theme?.tax_rate_percent) || 0;
     await orderModel.updateTotals(id, { subtotal: 0, adjustmentTotal: 0, total: 0, taxRatePercent, taxAmount: 0 }, trx);
 
-    const lines = cartRows.map((row) => ({
-      productId: row.product_id,
-      label: row.name,
-      unitPrice: Number(row.price),
-      quantity: row.quantity,
-    }));
+    // Configured lines (cart.model.js's unit_price) carry the price frozen
+    // at add-to-cart time; plain lines use the live product price, same as
+    // before. A flat one-time fee (e.g. installation — see pricing.service.js's
+    // isFlatFee choices) becomes its own separate 'line' row at quantity 1 so
+    // it is never multiplied by the configured item's quantity.
+    const lines = [];
+    cartRows.forEach((row) => {
+      const selectedOptions = row.selected_options
+        ? typeof row.selected_options === 'string'
+          ? JSON.parse(row.selected_options)
+          : row.selected_options
+        : null;
+      const unitPrice = row.configured_unit_price != null ? Number(row.configured_unit_price) : Number(row.price);
+      lines.push({
+        productId: row.product_id,
+        label: row.name,
+        unitPrice,
+        quantity: row.quantity,
+        selectedOptions,
+      });
+
+      const flatFeeChoices = (selectedOptions?.choices || []).filter((c) => c.priceDelta && c.isFlatFee);
+      flatFeeChoices.forEach((choice) => {
+        lines.push({
+          productId: row.product_id,
+          label: `${row.name} — ${choice.choiceLabel}`,
+          unitPrice: choice.priceDelta,
+          quantity: 1,
+          selectedOptions: null,
+        });
+      });
+    });
     await orderItemModel.insertLineItems(id, lines, trx);
     await recomputeAndStoreTotals(id, trx);
 

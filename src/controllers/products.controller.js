@@ -1,5 +1,8 @@
 const productService = require('../services/product.service');
 const uploadService = require('../services/upload.service');
+const productOptionsService = require('../services/productOptions.service');
+const pricingService = require('../services/pricing.service');
+const productModel = require('../models/product.model');
 const productSeoModel = require('../models/productSeo.model');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
@@ -98,6 +101,37 @@ const getProductSeo = asyncHandler(async (req, res) => {
   res.status(200).json(shapeProductSeo(row));
 });
 
+// Admin: full-replace read/write of a product's configurable pricing
+// (option groups + choices). GET is also usable by the storefront product
+// detail page (no admin-only fields in the shape — productOptions.service.js).
+const getProductOptions = asyncHandler(async (req, res) => {
+  const groups = await productOptionsService.getOptionsForProduct(Number(req.params.id));
+  res.status(200).json({ groups });
+});
+
+const setProductOptions = asyncHandler(async (req, res) => {
+  const groups = await productOptionsService.setOptionsForProduct(Number(req.params.id), req.body.groups || []);
+  res.status(200).json({ groups });
+});
+
+// Public: price-preview for a configurable product given a candidate
+// selection — used by the storefront product page to show a live price
+// before add-to-cart, without duplicating pricing.service.js's math client-side.
+const previewProductPrice = asyncHandler(async (req, res) => {
+  const product = await productModel.findById(Number(req.params.id));
+  if (!product) throw ApiError.notFound('Product not found');
+  const { selectedOptions, sizeInches } = req.body;
+  const priced = await pricingService.computePrice(product, {
+    choiceKeysByGroupKey: selectedOptions || {},
+    sizeInches: sizeInches !== undefined ? Number(sizeInches) : undefined,
+  });
+  res.status(200).json({
+    unitPrice: priced.unitPrice,
+    flatFeeDelta: priced.selectedOptionsSnapshot.flatFeeDelta,
+    totalWatts: priced.totalWatts,
+  });
+});
+
 module.exports = {
   listProducts,
   getProduct,
@@ -111,4 +145,7 @@ module.exports = {
   deleteProductImage,
   setProductGroups,
   getProductSeo,
+  getProductOptions,
+  setProductOptions,
+  previewProductPrice,
 };

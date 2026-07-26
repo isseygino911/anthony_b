@@ -13,7 +13,31 @@ async function applySchema(db) {
     t.decimal('price', 10, 2);
     t.integer('stock_quantity');
     t.integer('low_stock_threshold').nullable();
+    t.json('pricing_config').nullable();
     t.datetime('deleted_at').nullable();
+  });
+
+  await db.schema.createTable('product_option_groups', (t) => {
+    t.increments('id');
+    t.integer('product_id');
+    t.string('key');
+    t.string('label');
+    t.string('type').defaultTo('single_select');
+    t.integer('sort_order').defaultTo(0);
+    t.datetime('created_at');
+    t.datetime('updated_at');
+  });
+
+  await db.schema.createTable('product_option_choices', (t) => {
+    t.increments('id');
+    t.integer('option_group_id');
+    t.string('key');
+    t.string('label');
+    t.decimal('price_delta', 10, 2).defaultTo(0);
+    t.json('extra').nullable();
+    t.integer('sort_order').defaultTo(0);
+    t.datetime('created_at');
+    t.datetime('updated_at');
   });
 
   await db.schema.createTable('product_images', (t) => {
@@ -30,6 +54,10 @@ async function applySchema(db) {
     t.integer('product_id');
     t.integer('quantity');
     t.datetime('added_at');
+    t.string('options_hash', 64).nullable();
+    t.json('selected_options').nullable();
+    t.decimal('size_inches', 8, 2).nullable();
+    t.decimal('unit_price', 10, 2).nullable();
   });
 
   await db.schema.createTable('orders', (t) => {
@@ -56,6 +84,7 @@ async function applySchema(db) {
     t.decimal('unit_price', 10, 2).nullable();
     t.integer('quantity').nullable();
     t.decimal('amount', 10, 2).nullable();
+    t.json('selected_options').nullable();
     t.datetime('created_at');
   });
 

@@ -1,12 +1,30 @@
+const crypto = require('crypto');
 const db = require('../config/db');
 const cartModel = require('../models/cart.model');
 const productModel = require('../models/product.model');
+const pricingService = require('./pricing.service');
 const ApiError = require('../utils/apiError');
 const { signImageUrl } = require('../utils/signedImageUrl');
 
-// architecture.md §6 — cart merge-on-login algorithm, verbatim. Called from
-// auth.service.js on register/login/OAuth callback, never reimplemented per
-// auth method.
+// Deterministic hash of a configurable line's selections — identical
+// selections always upsert/increment the same cart row; any different
+// selection (size or a single option choice) becomes its own row
+// (migrations/033). Sorting choiceKeysByGroupKey's entries makes the hash
+// independent of client key ordering.
+function hashSelections(selections) {
+  const sortedChoices = Object.entries(selections.choiceKeysByGroupKey || {}).sort(([a], [b]) =>
+    a.localeCompare(b)
+  );
+  const canonical = JSON.stringify({ sizeInches: selections.sizeInches ?? null, choices: sortedChoices });
+  return crypto.createHash('sha256').update(canonical).digest('hex');
+}
+
+// architecture.md §6 — cart merge-on-login algorithm. Matches rows by
+// (product_id, options_hash), not product_id alone — two rows for the same
+// configurable product with different selections (e.g. different sizes)
+// must stay distinct lines after merge, not collapse into one with a
+// meaningless combined quantity/price (migrations/033). Plain products keep
+// merging exactly as before since their options_hash is always null.
 async function mergeAnonCartIntoUser(sessionId, userId, trx) {
   if (!sessionId) return; // no anon session cookie present -> nothing to merge
 
@@ -14,11 +32,11 @@ async function mergeAnonCartIntoUser(sessionId, userId, trx) {
   if (!anonRows.length) return; // idempotent: empty anon cart -> no-op
 
   const userRows = await cartModel.findUserRows(userId, trx);
-  const userRowByProduct = new Map(userRows.map((row) => [row.product_id, row]));
+  const userRowByKey = new Map(userRows.map((row) => [`${row.product_id}:${row.options_hash ?? ''}`, row]));
 
   // eslint-disable-next-line no-restricted-syntax
   for (const anonRow of anonRows) {
-    const matchingUserRow = userRowByProduct.get(anonRow.product_id);
+    const matchingUserRow = userRowByKey.get(`${anonRow.product_id}:${anonRow.options_hash ?? ''}`);
     if (matchingUserRow) {
       // eslint-disable-next-line no-await-in-loop
       await cartModel.updateQuantity(
@@ -41,17 +59,37 @@ function toIdentity({ user, anonSessionId }) {
   throw ApiError.badRequest('No cart identity available');
 }
 
+function parseJsonColumn(value) {
+  if (value == null) return null;
+  return typeof value === 'string' ? JSON.parse(value) : value;
+}
+
 async function shapeCart(rows) {
   const items = await Promise.all(
-    rows.map(async (row) => ({
-      productId: row.product_id,
-      name: row.name,
-      price: Number(row.price),
-      quantity: row.quantity,
-      imageUrl: await signImageUrl(row.image_url || null),
-    })),
+    rows.map(async (row) => {
+      // Configured lines carry their own frozen per-unit price
+      // (cart.model.js's unit_price column) computed at add-to-cart time;
+      // plain products always use the live product price, same as before.
+      const price = row.configured_unit_price != null ? Number(row.configured_unit_price) : Number(row.price);
+      const selectedOptions = parseJsonColumn(row.selected_options);
+      // Flat one-time fees (e.g. installation) apply once per line, never
+      // multiplied by quantity — see order.service.js's matching split into
+      // a separate order_items row at checkout.
+      const flatFeeTotal = Number(selectedOptions?.flatFeeDelta) || 0;
+      return {
+        cartId: row.cart_id,
+        productId: row.product_id,
+        name: row.name,
+        price,
+        quantity: row.quantity,
+        flatFeeTotal,
+        selectedOptions,
+        sizeInches: row.size_inches != null ? Number(row.size_inches) : null,
+        imageUrl: await signImageUrl(row.image_url || null),
+      };
+    }),
   );
-  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity + item.flatFeeTotal, 0);
   return { items, subtotal: Number(subtotal.toFixed(2)) };
 }
 
@@ -61,17 +99,39 @@ async function getCart(identityInput) {
   return shapeCart(rows);
 }
 
-async function addItem(identityInput, productId, quantity) {
+async function addItem(identityInput, productId, quantity, selections = null) {
   const identity = toIdentity(identityInput);
   const product = await productModel.findById(productId);
   if (!product) throw ApiError.notFound('Product not found');
+
+  if (pricingService.isConfigurable(product)) {
+    if (!selections) throw ApiError.badRequest('This product requires selectedOptions/sizeInches');
+    const priced = await pricingService.computePrice(product, selections);
+    const optionsHash = hashSelections(selections);
+
+    await db.transaction(async (trx) => {
+      const existing = await cartModel.findRowByIdentityProductAndOptions(identity, productId, optionsHash, trx);
+      if (existing) {
+        await cartModel.updateQuantity(existing.cart_id, existing.quantity + quantity, trx);
+      } else {
+        await cartModel.insertRow(identity, productId, quantity, {
+          optionsHash,
+          selectedOptions: priced.selectedOptionsSnapshot,
+          sizeInches: selections.sizeInches ?? null,
+          unitPrice: priced.unitPrice,
+        }, trx);
+      }
+    });
+
+    return getCart(identityInput);
+  }
 
   await db.transaction(async (trx) => {
     const existing = await cartModel.findRowByIdentityAndProduct(identity, productId, trx);
     if (existing) {
       await cartModel.updateQuantity(existing.cart_id, existing.quantity + quantity, trx);
     } else {
-      await cartModel.insertRow(identity, productId, quantity, trx);
+      await cartModel.insertRow(identity, productId, quantity, {}, trx);
     }
   });
 
@@ -98,6 +158,35 @@ async function removeItem(identityInput, productId) {
   return getCart(identityInput);
 }
 
+// Cart-line-scoped variants — required for configurable products, where the
+// same productId can appear as multiple distinct lines (different
+// size/options), so a lookup by productId alone is ambiguous. Flat products
+// may also use these safely since cart_id is always unique per row.
+async function assertOwnedRow(identityInput, cartId) {
+  const identity = toIdentity(identityInput);
+  const row = await cartModel.findById(cartId);
+  if (!row) throw ApiError.notFound('Cart item not found');
+  const owned = identity.userId ? row.user_id === identity.userId : row.session_id === identity.sessionId;
+  if (!owned) throw ApiError.notFound('Cart item not found');
+  return row;
+}
+
+async function updateItemQuantityByCartId(identityInput, cartId, quantity) {
+  await assertOwnedRow(identityInput, cartId);
+  if (quantity <= 0) {
+    await cartModel.deleteRow(cartId);
+  } else {
+    await cartModel.updateQuantity(cartId, quantity);
+  }
+  return getCart(identityInput);
+}
+
+async function removeItemByCartId(identityInput, cartId) {
+  await assertOwnedRow(identityInput, cartId);
+  await cartModel.deleteRow(cartId);
+  return getCart(identityInput);
+}
+
 async function clearCart(identityInput) {
   const identity = toIdentity(identityInput);
   await cartModel.deleteAllForIdentity(identity);
@@ -109,5 +198,7 @@ module.exports = {
   addItem,
   updateItemQuantity,
   removeItem,
+  updateItemQuantityByCartId,
+  removeItemByCartId,
   clearCart,
 };

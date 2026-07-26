@@ -18,6 +18,10 @@ router.get('/cart', cartController.getCart);
 router.post('/cart/items', cartController.addItem);
 router.patch('/cart/items/:productId', cartController.updateItem);
 router.delete('/cart/items/:productId', cartController.removeItem);
+// Cart-line-scoped variants (by cart_id) — required for configurable
+// products, where the same product can appear as multiple distinct lines.
+router.patch('/cart/lines/:cartId', cartController.updateItemByCartId);
+router.delete('/cart/lines/:cartId', cartController.removeItemByCartId);
 router.delete('/cart', cartController.clearCart);
 
 module.exports = router;

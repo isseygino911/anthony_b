@@ -46,6 +46,7 @@ async function resetSchema() {
     t.boolean('is_bestseller').defaultTo(false);
     t.boolean('is_clearance').defaultTo(false);
     t.boolean('is_active').notNullable().defaultTo(true);
+    t.json('pricing_config').nullable();
     t.datetime('deleted_at').nullable();
     t.datetime('created_at');
     t.datetime('updated_at');
@@ -67,6 +68,10 @@ async function resetSchema() {
     t.integer('product_id');
     t.integer('quantity');
     t.datetime('added_at');
+    t.string('options_hash', 64).nullable();
+    t.json('selected_options').nullable();
+    t.decimal('size_inches', 8, 2).nullable();
+    t.decimal('unit_price', 10, 2).nullable();
   });
 
   await db.schema.createTable('custom_neon_designs', (t) => {

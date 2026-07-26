@@ -39,6 +39,11 @@ function parseTags(tags) {
   return typeof tags === 'string' ? JSON.parse(tags) : tags;
 }
 
+function parsePricingConfig(pricingConfig) {
+  if (!pricingConfig) return null;
+  return typeof pricingConfig === 'string' ? JSON.parse(pricingConfig) : pricingConfig;
+}
+
 // Customer-facing responses never include exact stock_quantity (plan §9.1) —
 // only admins see the real number.
 async function shapeProduct(product, { isAdmin, images, primaryImageUrl, groupIds } = {}) {
@@ -54,6 +59,7 @@ async function shapeProduct(product, { isAdmin, images, primaryImageUrl, groupId
     is_bestseller: Boolean(product.is_bestseller),
     is_clearance: Boolean(product.is_clearance),
     stockStatus: stockStatus(product),
+    pricing_config: parsePricingConfig(product.pricing_config),
   };
   if (isAdmin) {
     base.stock_quantity = product.stock_quantity;

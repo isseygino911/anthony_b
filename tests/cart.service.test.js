@@ -26,6 +26,7 @@ async function seedCart(rows) {
       user_id: row.userId ?? null,
       product_id: row.productId,
       quantity: row.quantity,
+      options_hash: row.optionsHash ?? null,
       added_at: new Date(),
     }))
   );
@@ -93,6 +94,34 @@ describe('cart.service.mergeAnonCartIntoUser', () => {
     const byProduct = new Map(rows.map((r) => [r.product_id, r]));
     expect(byProduct.get(1)).toMatchObject({ user_id: 8, quantity: 5, session_id: null });
     expect(byProduct.get(2)).toMatchObject({ user_id: 8, quantity: 6, session_id: null });
+  });
+
+  it('keeps two configurable-product rows for the same product_id separate when their options_hash differs (does not merge different configurations)', async () => {
+    await seedCart([
+      { userId: 50, productId: 100, quantity: 1, optionsHash: 'hash-24in-motion-sensor' },
+      { sessionId: 'anon-5', productId: 100, quantity: 1, optionsHash: 'hash-12in-no-controller' },
+    ]);
+
+    await db.transaction((trx) => cartService.mergeAnonCartIntoUser('anon-5', 50, trx));
+
+    const rows = await cartRows();
+    expect(rows).toHaveLength(2); // different configurations of the same product never collapse into one row
+    const byHash = new Map(rows.map((r) => [r.options_hash, r]));
+    expect(byHash.get('hash-24in-motion-sensor')).toMatchObject({ user_id: 50, quantity: 1 });
+    expect(byHash.get('hash-12in-no-controller')).toMatchObject({ user_id: 50, quantity: 1, session_id: null });
+  });
+
+  it('sums quantities for two rows with matching product_id AND matching options_hash', async () => {
+    await seedCart([
+      { userId: 51, productId: 101, quantity: 2, optionsHash: 'hash-same' },
+      { sessionId: 'anon-6', productId: 101, quantity: 3, optionsHash: 'hash-same' },
+    ]);
+
+    await db.transaction((trx) => cartService.mergeAnonCartIntoUser('anon-6', 51, trx));
+
+    const rows = await cartRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ user_id: 51, quantity: 5, options_hash: 'hash-same' });
   });
 
   it('running merge twice in a row is safe (second call is a no-op, per-login idempotency)', async () => {

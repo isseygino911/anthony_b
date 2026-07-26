@@ -13,6 +13,7 @@ async function insertLineItems(orderId, lines, trx) {
     unit_price: line.unitPrice,
     quantity: line.quantity,
     amount: null,
+    selected_options: line.selectedOptions ? JSON.stringify(line.selectedOptions) : null,
     created_at: now,
   }));
   await trx(TABLE).insert(rows);

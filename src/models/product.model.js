@@ -85,6 +85,7 @@ async function insertProduct(data, trx = db) {
     is_featured: Boolean(data.is_featured),
     is_bestseller: Boolean(data.is_bestseller),
     is_clearance: Boolean(data.is_clearance),
+    pricing_config: data.pricing_config ? JSON.stringify(data.pricing_config) : null,
     created_at: now,
     updated_at: now,
   });
@@ -109,6 +110,9 @@ async function updateProduct(id, data, trx = db) {
     if (data[field] !== undefined) patch[field] = data[field];
   });
   if (data.tags !== undefined) patch.tags = data.tags ? JSON.stringify(data.tags) : null;
+  if (data.pricing_config !== undefined) {
+    patch.pricing_config = data.pricing_config ? JSON.stringify(data.pricing_config) : null;
+  }
 
   await trx(TABLE).where({ id }).update(patch);
   return findById(id, trx);

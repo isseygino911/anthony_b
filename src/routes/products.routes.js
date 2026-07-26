@@ -35,4 +35,10 @@ router.delete(
 );
 router.get('/admin/products/:id/seo', requireAuth, requireAdmin, productsController.getProductSeo);
 
+// Configurable-product pricing (option groups/choices). GET is public —
+// the storefront product detail page needs it to render selectable options.
+router.get('/products/:id/options', productsController.getProductOptions);
+router.put('/admin/products/:id/options', requireAuth, requireAdmin, productsController.setProductOptions);
+router.post('/products/:id/price-preview', productsController.previewProductPrice);
+
 module.exports = router;
