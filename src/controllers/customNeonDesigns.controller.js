@@ -2,10 +2,11 @@ const customNeonDesignService = require('../services/customNeonDesign.service');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
 
-// requireAuth (routes/customNeonDesigns.routes.js) guarantees req.user is set
-// for every route in this controller — no anonymous/session-based identity.
+// attachUserIfPresent + maybeAnonSession (routes/customNeonDesigns.routes.js)
+// guarantee exactly one of req.user / req.anonSessionId is set for every
+// route in this controller — same identity convention as cart.
 function identityFromReq(req) {
-  return { user: req.user, anonSessionId: null };
+  return { user: req.user, anonSessionId: req.anonSessionId ?? null };
 }
 
 function parseStrokes(raw) {

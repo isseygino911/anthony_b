@@ -1,21 +1,27 @@
 const express = require('express');
 const multer = require('multer');
 const customNeonDesignsController = require('../controllers/customNeonDesigns.controller');
-const { requireAuth, requireAdmin } = require('../middleware/auth.middleware');
+const { requireAuth, requireAdmin, attachUserIfPresent } = require('../middleware/auth.middleware');
+const { ensureAnonSession } = require('../middleware/anonSession.middleware');
 const { neonGenerationLimiter } = require('../middleware/rateLimit.middleware');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const router = express.Router();
 
-// Public landing-page gallery — must be registered before the requireAuth
-// blanket below (and named "showcase", not a param route) so it's never
-// mistaken for /custom-neon-designs/:id or swallowed by the auth gate.
+// Public landing-page gallery — must be registered before the identity
+// middleware below (and named "showcase", not a param route) so it's never
+// mistaken for /custom-neon-designs/:id.
 router.get('/custom-neon-designs/showcase', customNeonDesignsController.listShowcase);
 
-// Unlike cart, this requires login (not anon-session) — every design/regenerate
-// call spends a Gemini image-generation call, so it's gated to accounts only
-// to keep token usage attributable and abuse-resistant.
-router.use('/custom-neon-designs', requireAuth);
+// Works for both anonymous and logged-in callers, same convention as cart
+// (routes/cart.routes.js) — an anon session cookie is only issued for
+// unauthenticated visitors.
+function maybeAnonSession(req, res, next) {
+  if (req.user) return next();
+  return ensureAnonSession(req, res, next);
+}
+
+router.use('/custom-neon-designs', attachUserIfPresent, maybeAnonSession);
 
 // Generation-triggering routes only — 2 per user per minute (rateLimit.middleware.js).
 router.post(

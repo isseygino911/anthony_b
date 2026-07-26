@@ -26,7 +26,14 @@ function toModelIdentity(identity) {
 }
 
 function assertIdentity(identity) {
-  if (!identity.user) throw ApiError.badRequest('No design identity available');
+  if (!identity.user && !identity.anonSessionId) throw ApiError.badRequest('No design identity available');
+}
+
+// Active-design lookup keyed on whichever half of the identity is set —
+// same "exactly one of the two" convention as belongsToIdentity.
+function findActive(identity) {
+  if (identity.user) return customNeonDesignModel.findActiveByUserId(identity.user.id);
+  return customNeonDesignModel.findActiveBySessionId(identity.anonSessionId);
 }
 
 // The bucket has Block Public Access, so every stored S3 URL needs signing
@@ -70,7 +77,7 @@ async function createDesign(identity, { designType, file, strokes, text, fontFam
   if (!['upload', 'draw', 'text'].includes(designType)) throw ApiError.badRequest('Invalid design_type');
   assertSizeAndColor(size, neonColor);
 
-  const active = await customNeonDesignModel.findActiveByUserId(identity.user.id);
+  const active = await findActive(identity);
   if (active) throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
 
   const imageUrl = await uploadService.putFile(file, 'custom-neon/source');
@@ -117,7 +124,7 @@ async function getDesign(id, identity) {
 // power the persistent site-wide "generating" indicator.
 async function getActiveDesign(identity) {
   assertIdentity(identity);
-  const row = await customNeonDesignModel.findActiveByUserId(identity.user.id);
+  const row = await findActive(identity);
   return row ? shapeDesign(row) : null;
 }
 
@@ -128,10 +135,8 @@ async function regenerate(id, identity, { size, neonColor } = {}) {
   const row = await getOwnedDesign(id, identity);
   if (size !== undefined || neonColor !== undefined) assertSizeAndColor(size, neonColor);
 
-  if (identity.user) {
-    const active = await customNeonDesignModel.findActiveByUserId(identity.user.id);
-    if (active && active.id !== row.id) throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
-  }
+  const active = await findActive(identity);
+  if (active && active.id !== row.id) throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
   if (row.status === 'pending' || row.status === 'processing') throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
 
   await customNeonDesignModel.requeue(id, { size, neonColor });
@@ -194,13 +199,17 @@ async function confirmDesign(id, identity) {
 // past confirmed designs.
 async function listMine(identity, { page, pageSize }) {
   assertIdentity(identity);
-  const userId = identity.user.id;
   const limit = pageSize;
   const offset = (page - 1) * pageSize;
-  const [rows, countRow] = await Promise.all([
-    customNeonDesignModel.listMine(userId, { limit, offset }),
-    customNeonDesignModel.countMine(userId),
-  ]);
+  const [rows, countRow] = identity.user
+    ? await Promise.all([
+        customNeonDesignModel.listMine(identity.user.id, { limit, offset }),
+        customNeonDesignModel.countMine(identity.user.id),
+      ])
+    : await Promise.all([
+        customNeonDesignModel.listMineBySessionId(identity.anonSessionId, { limit, offset }),
+        customNeonDesignModel.countMineBySessionId(identity.anonSessionId),
+      ]);
   return {
     items: await Promise.all(rows.map(shapeDesign)),
     total: Number(countRow.count),

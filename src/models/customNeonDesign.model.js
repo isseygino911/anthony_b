@@ -55,15 +55,20 @@ function reclaimStuckProcessing(trx = db) {
     .update({ status: 'pending', updated_at: new Date() });
 }
 
-// A user may only have one design generating at a time (createDesign /
-// regenerate both enforce this) — used both to block a second concurrent
-// generation and to let the frontend find/reattach to an in-progress design
-// after a refresh or on a fresh page load.
+// An identity (logged-in user or anon session) may only have one design
+// generating at a time (createDesign/regenerate both enforce this) — used
+// both to block a second concurrent generation and to let the frontend
+// find/reattach to an in-progress design after a refresh or on a fresh page
+// load.
 function findActiveByUserId(userId, trx = db) {
   return trx(TABLE).whereIn('status', ['pending', 'processing']).andWhere({ user_id: userId }).first();
 }
 
-// Customer-facing "My Designs" list — every design the user has ever
+function findActiveBySessionId(sessionId, trx = db) {
+  return trx(TABLE).whereIn('status', ['pending', 'processing']).andWhere({ session_id: sessionId }).first();
+}
+
+// Customer-facing "My Designs" list — every design the caller has ever
 // generated, regardless of status, newest first.
 function listMine(userId, { limit, offset }, trx = db) {
   return trx(TABLE).where({ user_id: userId }).orderBy('created_at', 'desc').limit(limit).offset(offset);
@@ -71,6 +76,14 @@ function listMine(userId, { limit, offset }, trx = db) {
 
 function countMine(userId, trx = db) {
   return trx(TABLE).where({ user_id: userId }).count({ count: '*' }).first();
+}
+
+function listMineBySessionId(sessionId, { limit, offset }, trx = db) {
+  return trx(TABLE).where({ session_id: sessionId }).orderBy('created_at', 'desc').limit(limit).offset(offset);
+}
+
+function countMineBySessionId(sessionId, trx = db) {
+  return trx(TABLE).where({ session_id: sessionId }).count({ count: '*' }).first();
 }
 
 function markProcessing(id, trx = db) {
@@ -213,8 +226,11 @@ module.exports = {
   listPending,
   reclaimStuckProcessing,
   findActiveByUserId,
+  findActiveBySessionId,
   listMine,
   countMine,
+  listMineBySessionId,
+  countMineBySessionId,
   markProcessing,
   saveResult,
   markFailed,
