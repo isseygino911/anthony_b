@@ -6,6 +6,7 @@ const productModel = require('../models/product.model');
 const productSeoModel = require('../models/productSeo.model');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
+const { validatePricingConfig } = require('../services/pricingFormulas/validateConfig');
 const { signImageUrl } = require('../utils/signedImageUrl');
 
 // product_seo's JSON columns come back auto-parsed on MySQL but as strings
@@ -47,13 +48,25 @@ const getProduct = asyncHandler(async (req, res) => {
   res.status(200).json(product);
 });
 
+// A custom formula may reference the product's option groups by key, so the
+// groups it currently has persisted decide which variable names are legal.
+// A brand-new product has none yet (they are saved after the product row
+// exists), so those names are re-checked on the next save.
+async function assertValidPricingConfig(pricingConfig, productId) {
+  const groups = productId ? await productOptionsService.getOptionsForProduct(productId) : [];
+  validatePricingConfig(pricingConfig, groups);
+}
+
 const createProduct = asyncHandler(async (req, res) => {
+  await assertValidPricingConfig(req.body.pricing_config, null);
   const product = await productService.createProduct(req.body);
   res.status(201).json(product);
 });
 
 const updateProduct = asyncHandler(async (req, res) => {
-  const product = await productService.updateProduct(Number(req.params.id), req.body);
+  const id = Number(req.params.id);
+  if ('pricing_config' in req.body) await assertValidPricingConfig(req.body.pricing_config, id);
+  const product = await productService.updateProduct(id, req.body);
   res.status(200).json(product);
 });
 
@@ -120,8 +133,19 @@ const setProductOptions = asyncHandler(async (req, res) => {
 const previewProductPrice = asyncHandler(async (req, res) => {
   const product = await productModel.findById(Number(req.params.id));
   if (!product) throw ApiError.notFound('Product not found');
-  const { selectedOptions, sizeInches } = req.body;
-  const priced = await pricingService.computePrice(product, {
+  const { selectedOptions, sizeInches, pricingConfigOverride } = req.body;
+
+  // Admin-only: price an unsaved draft config so the formula builder previews
+  // through the same code path customers are charged by, rather than a
+  // client-side approximation that could disagree with it.
+  let priceable = product;
+  if (pricingConfigOverride !== undefined) {
+    if (!isAdminReq(req)) throw ApiError.forbidden('Only admins may preview an unsaved pricing config');
+    await assertValidPricingConfig(pricingConfigOverride, product.id);
+    priceable = { ...product, pricing_config: pricingConfigOverride };
+  }
+
+  const priced = await pricingService.computePrice(priceable, {
     choiceKeysByGroupKey: selectedOptions || {},
     sizeInches: sizeInches !== undefined ? Number(sizeInches) : undefined,
   });
