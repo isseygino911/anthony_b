@@ -6,8 +6,11 @@ const categoryModel = require('../models/category.model');
 const userModel = require('../models/user.model');
 const uploadService = require('../services/upload.service');
 const cartService = require('./cart.service');
+const productEmbeddingSyncService = require('./productEmbeddingSync.service');
+const productSeoSyncService = require('./productSeoSync.service');
 const ApiError = require('../utils/apiError');
 const { signImageUrl } = require('../utils/signedImageUrl');
+const { isConfigured: geminiIsConfigured } = require('../config/gemini');
 
 const CUSTOM_NEON_CATEGORY_SLUG = 'custom-neon-signs';
 
@@ -194,6 +197,97 @@ async function confirmDesign(id, identity) {
   return { design: await shapeDesign(await customNeonDesignModel.findById(id)), cart };
 }
 
+// Admin-only: publish any ready design as a real, shop-visible catalog
+// product. Deliberately different from confirmDesign above in three ways:
+//
+//  - No ownership check. Anonymous generation (routes: attachUserIfPresent
+//    instead of requireAuth) means a design may have user_id NULL, which
+//    belongsToIdentity can never match for a logged-in admin. That is exactly
+//    the case this endpoint exists to rescue, so it keys on the design id
+//    alone — requireAdmin on the route is the authorization.
+//  - Its own SKU namespace. confirmDesign relies on NEON-${id} being unique
+//    for its idempotency (see its comment above); reusing it here would make
+//    a later customer confirm collide instead of re-adding to cart.
+//  - is_active true. confirmDesign creates a hidden checkout vehicle; this
+//    creates something customers can actually browse.
+//
+// Does not set design.product_id: that column means "confirmed into a
+// customer order", and overloading it would both misreport the design as
+// purchased and hide it from the cleanup job's purge candidates.
+async function createProductFromDesign(designId, { name, description, price, categoryId, isActive = true }) {
+  const row = await customNeonDesignModel.findById(designId);
+  if (!row) throw ApiError.notFound('Design not found');
+  if (row.status !== 'ready') throw ApiError.badRequest('Only a design with a ready preview can be published');
+  if (!row.generated_image_url) {
+    throw ApiError.badRequest('This design no longer has a preview image and cannot be published');
+  }
+
+  const category = await categoryModel.findById(categoryId);
+  if (!category) throw ApiError.badRequest('Category not found');
+
+  // Publishing leaves design.product_id null (see above), so the designs
+  // list still offers "Create product" for an already-published design and
+  // it is easy to click twice. products.sku is uniquely indexed, so the
+  // second attempt would otherwise surface a raw ER_DUP_ENTRY as a 500 —
+  // after having already uploaded a duplicate S3 object. Check first.
+  const sku = `NEON-PUB-${row.id}`;
+  const existing = await productModel.findBySku(sku);
+  if (existing) {
+    throw ApiError.conflict(`This design was already published as product #${existing.id}`);
+  }
+
+  // Copy rather than reference: the design's own image is a purge candidate
+  // for as long as product_id stays null (neon-design-cleanup.js), so a
+  // shared URL would 404 the moment that job runs. A copy keeps the
+  // product's image lifecycle independent of the design's.
+  const { buffer, mimetype } = await uploadService.getObjectBuffer(row.generated_image_url);
+  const imageUrl = await uploadService.putBuffer(buffer, mimetype, 'products/custom-neon');
+
+  const product = await db.transaction(async (trx) => {
+    const created = await productModel.insertProduct(
+      {
+        category_id: category.id,
+        name,
+        description,
+        price,
+        sku,
+        stock_quantity: 9999,
+      },
+      trx
+    );
+    if (!isActive) await trx('products').where({ id: created.id }).update({ is_active: false });
+    await productImageModel.insertImages(
+      [{ product_id: created.id, url: imageUrl, is_primary: true, sort_order: 0 }],
+      trx
+    );
+    return productModel.findById(created.id, trx);
+  });
+
+  // Unlike confirmDesign's hidden per-order product, this is a browsable
+  // catalog listing, so it needs the same background enrichment
+  // product.service.createProduct gives everything else. Fire-and-forget for
+  // the same reason it is there: both only enqueue work for out-of-process
+  // workers, and neither should be able to fail the publish.
+  productSeoSyncService.enqueueProduct(product).catch((err) => {
+    console.error(`[customNeonDesign.service] enqueueProduct(${product.id}) failed`, err);
+  });
+  if (geminiIsConfigured) {
+    productEmbeddingSyncService.syncProduct(product).catch((err) => {
+      console.error(`[customNeonDesign.service] syncProduct(${product.id}) failed`, err);
+    });
+  }
+
+  return product;
+}
+
+// Called from auth.service.js on register/login/OAuth, in the same
+// transaction as the cart merge — anything generated anonymously before
+// signing in should follow the visitor into their account.
+async function mergeAnonDesignsIntoUser(sessionId, userId, trx) {
+  if (!sessionId) return;
+  await customNeonDesignModel.reassignSessionToUser(sessionId, userId, trx);
+}
+
 // Customer-facing "My Designs" list — every design the caller has ever
 // generated (any status), so they can track pending previews and re-order
 // past confirmed designs.
@@ -280,7 +374,8 @@ async function getUsageByUser({ page, pageSize }) {
     customNeonDesignModel.countUsageByUser(),
   ]);
 
-  const users = await userModel.findByIds(rows.map((row) => row.user_id));
+  // The NULL bucket (anonymous visitors) has no user to look up.
+  const users = await userModel.findByIds(rows.map((row) => row.user_id).filter((id) => id !== null));
   const userById = new Map(users.map((user) => [user.id, user]));
 
   return {
@@ -289,7 +384,7 @@ async function getUsageByUser({ page, pageSize }) {
       return {
         userId: row.user_id,
         userEmail: user?.email ?? null,
-        userName: user?.name ?? null,
+        userName: row.user_id === null ? 'Anonymous' : (user?.name ?? null),
         designCount: Number(row.designCount),
         confirmedCount: Number(row.confirmedCount),
         lastGeneratedAt: row.lastGeneratedAt,
@@ -302,11 +397,15 @@ async function getUsageByUser({ page, pageSize }) {
 }
 
 module.exports = {
+  SIZE_PRICES,
+  SIZE_DIMENSIONS,
   createDesign,
   getDesign,
   getActiveDesign,
   regenerate,
   confirmDesign,
+  createProductFromDesign,
+  mergeAnonDesignsIntoUser,
   listMine,
   listShowcase,
   listAdmin,

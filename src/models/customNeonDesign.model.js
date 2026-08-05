@@ -86,6 +86,19 @@ function countMineBySessionId(sessionId, trx = db) {
   return trx(TABLE).where({ session_id: sessionId }).count({ count: '*' }).first();
 }
 
+// Claims the designs generated during an anon session for the account that
+// session just logged into / registered as. Mirrors
+// cartService.mergeAnonCartIntoUser — without it, listMine branches on the
+// user half of the identity first and a visitor who designed before signing
+// up sees an empty "My Designs". Clearing session_id keeps the
+// "exactly one of the two" convention belongsToIdentity relies on.
+function reassignSessionToUser(sessionId, userId, trx = db) {
+  return trx(TABLE)
+    .where({ session_id: sessionId })
+    .whereNull('user_id')
+    .update({ user_id: userId, session_id: null, updated_at: new Date() });
+}
+
 function markProcessing(id, trx = db) {
   return trx(TABLE).where({ id }).update({ status: 'processing', updated_at: new Date() });
 }
@@ -197,12 +210,15 @@ function countAdmin({ status }, trx = db) {
   return q;
 }
 
-// Per-user generation activity (admin "Custom Neon Usage" tab) — rows
-// without a user_id (pre-login-requirement anon-session designs) can't be
-// attributed to anyone and are excluded.
+// Per-user generation activity (admin "Custom Neon Usage" tab). Anonymous
+// designs (user_id NULL) used to be excluded as a legacy artifact from before
+// login was required; since anonymous generation was allowed they are the
+// normal case for every signed-out visitor, and dropping them made this tab
+// under-report real usage. They group into a single NULL bucket, which the
+// service renders as "Anonymous" — individual anon sessions are deliberately
+// not broken out, since they are not attributable to a person.
 function listUsageByUser({ limit, offset }, trx = db) {
   return trx(TABLE)
-    .whereNotNull('user_id')
     .groupBy('user_id')
     .select('user_id')
     .count({ designCount: '*' })
@@ -213,8 +229,14 @@ function listUsageByUser({ limit, offset }, trx = db) {
     .offset(offset);
 }
 
-function countUsageByUser(trx = db) {
-  return trx(TABLE).whereNotNull('user_id').countDistinct({ count: 'user_id' }).first();
+// COUNT(DISTINCT user_id) skips NULLs, so the anonymous bucket has to be
+// added back explicitly or pagination undercounts by one page-worth.
+async function countUsageByUser(trx = db) {
+  const [distinctRow, anonRow] = await Promise.all([
+    trx(TABLE).countDistinct({ count: 'user_id' }).first(),
+    trx(TABLE).whereNull('user_id').count({ count: '*' }).first(),
+  ]);
+  return { count: Number(distinctRow.count) + (Number(anonRow.count) > 0 ? 1 : 0) };
 }
 
 module.exports = {
@@ -231,6 +253,7 @@ module.exports = {
   countMine,
   listMineBySessionId,
   countMineBySessionId,
+  reassignSessionToUser,
   markProcessing,
   saveResult,
   markFailed,

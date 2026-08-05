@@ -86,6 +86,30 @@ const updateDesignAdminNotes = asyncHandler(async (req, res) => {
   res.status(200).json(design);
 });
 
+// Admin "Create product" on the Custom Neon Designs page. Name/price default
+// from the design so a one-off publish needs no typing, but every field is
+// overridable because this produces a real catalog listing, not the hidden
+// checkout product confirmDesign makes.
+const createProductFromDesign = asyncHandler(async (req, res) => {
+  const designId = Number(req.params.id);
+  const { name, description, price, category_id: categoryId, is_active: isActive } = req.body;
+
+  if (!name || !String(name).trim()) throw ApiError.badRequest('name is required');
+  if (!Number.isInteger(Number(categoryId))) throw ApiError.badRequest('category_id is required');
+
+  const parsedPrice = Number(price);
+  if (!Number.isFinite(parsedPrice) || parsedPrice < 0) throw ApiError.badRequest('price must be a positive number');
+
+  const product = await customNeonDesignService.createProductFromDesign(designId, {
+    name: String(name).trim(),
+    description: description ? String(description) : null,
+    price: parsedPrice,
+    categoryId: Number(categoryId),
+    isActive: isActive !== false,
+  });
+  res.status(201).json(product);
+});
+
 const listUsageAdmin = asyncHandler(async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
@@ -104,5 +128,6 @@ module.exports = {
   listDesignsAdmin,
   getDesignAdmin,
   updateDesignAdminNotes,
+  createProductFromDesign,
   listUsageAdmin,
 };

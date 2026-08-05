@@ -62,6 +62,13 @@ function findByIdIncludingDeleted(id, trx = db) {
   return trx(TABLE).where({ id }).first();
 }
 
+// Deliberately does not filter deleted_at: the unique index on sku doesn't
+// either, so a soft-deleted product still occupies its SKU. Callers checking
+// "is this SKU free to insert?" must see those rows too.
+function findBySku(sku, trx = db) {
+  return trx(TABLE).where({ sku }).first();
+}
+
 function findByIdForUpdate(id, trx) {
   return trx(TABLE).where({ id }).forUpdate().first();
 }
@@ -145,6 +152,7 @@ module.exports = {
   findByIdIncludingDeleted,
   findByIdForUpdate,
   findByIds,
+  findBySku,
   insertProduct,
   updateProduct,
   softDeleteProduct,

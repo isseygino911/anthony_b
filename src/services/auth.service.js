@@ -5,6 +5,7 @@ const db = require('../config/db');
 const config = require('../config/env');
 const userModel = require('../models/user.model');
 const cartService = require('./cart.service');
+const customNeonDesignService = require('./customNeonDesign.service');
 const ApiError = require('../utils/apiError');
 
 const SALT_ROUNDS = 10;
@@ -31,6 +32,7 @@ async function register({ email, password, name }, anonSessionId) {
       trx
     );
     await cartService.mergeAnonCartIntoUser(anonSessionId, created.id, trx);
+    await customNeonDesignService.mergeAnonDesignsIntoUser(anonSessionId, created.id, trx);
     return created;
   });
 
@@ -46,8 +48,12 @@ async function login({ email, password }, anonSessionId) {
 
   // architecture.md §6 — cart merge runs inside the same transaction as the
   // auth event, before the response is sent. Merge logic itself lives only
-  // in cart.service.js; every auth method just calls it.
-  await db.transaction((trx) => cartService.mergeAnonCartIntoUser(anonSessionId, user.id, trx));
+  // in cart.service.js; every auth method just calls it. Custom neon designs
+  // follow the same rule for the same reason.
+  await db.transaction(async (trx) => {
+    await cartService.mergeAnonCartIntoUser(anonSessionId, user.id, trx);
+    await customNeonDesignService.mergeAnonDesignsIntoUser(anonSessionId, user.id, trx);
+  });
 
   return { user: toPublicUser(user), token: issueJwt(user) };
 }
@@ -94,6 +100,7 @@ async function handleGoogleCallback(code, anonSessionId) {
       );
     }
     await cartService.mergeAnonCartIntoUser(anonSessionId, existing.id, trx);
+    await customNeonDesignService.mergeAnonDesignsIntoUser(anonSessionId, existing.id, trx);
     return existing;
   });
 
