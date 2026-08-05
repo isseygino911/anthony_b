@@ -139,7 +139,7 @@ Never commit the real `.env` file.
 | `AWS_REGION` | S3 bucket region |
 | `S3_BUCKET_NAME` | S3 bucket for product images and logo |
 | `COOKIE_DOMAIN` | Domain scope for auth/session cookies |
-| `CLIENT_ORIGIN` | Origin of the separate frontend repo's dev server, used for CORS |
+| `CLIENT_ORIGIN` | Origin of the separate frontend repo's dev server, used for CORS — accepts a comma-separated list of allowed origins, the first of which is the canonical one used for the post-OAuth redirect |
 | `CSRF_SECRET` | Signing secret for CSRF double-submit tokens — generate a real random string |
 | `DEFAULT_LOW_STOCK_THRESHOLD` | Global fallback low-stock threshold when a product has no per-product override |
 

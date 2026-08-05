@@ -38,12 +38,14 @@ app.use(
 
 // Frontend and API are served from separate subdomains (architecture.md §3),
 // so cross-origin requests need CORS. credentials: true + an exact reflected
-// origin (never '*') because auth relies on cookies. X-CSRF-Token is a custom
-// header the CSRF double-submit-cookie flow (csrf.middleware.js) needs the
-// browser to be allowed to send cross-origin.
+// origin (never '*') because auth relies on cookies — cors() matches the
+// request against the clientOrigins list and reflects back the one that hit,
+// so both the canonical www origin and the bare apex can be allowed.
+// X-CSRF-Token is a custom header the CSRF double-submit-cookie flow
+// (csrf.middleware.js) needs the browser to be allowed to send cross-origin.
 app.use(
   cors({
-    origin: config.clientOrigin,
+    origin: config.clientOrigins,
     credentials: true,
     allowedHeaders: ['Content-Type', 'X-CSRF-Token'],
   })

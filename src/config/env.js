@@ -11,6 +11,16 @@ function required(name) {
   return value;
 }
 
+// CLIENT_ORIGIN accepts a comma-separated list so the API can allow both the
+// canonical www origin and the bare apex. The first entry is the canonical one
+// (config.clientOrigin below), used for the post-OAuth redirect, which needs a
+// single destination.
+function parseOrigins(value) {
+  return [...new Set(value.split(',').map((origin) => origin.trim()).filter(Boolean))];
+}
+
+const clientOrigins = parseOrigins(process.env.CLIENT_ORIGIN || 'http://localhost:5173');
+
 const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 4002,
@@ -50,7 +60,8 @@ const config = {
   },
 
   cookieDomain: process.env.COOKIE_DOMAIN || 'localhost',
-  clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+  clientOrigin: clientOrigins[0],
+  clientOrigins,
   csrfSecret: process.env.CSRF_SECRET,
   defaultLowStockThreshold: Number(process.env.DEFAULT_LOW_STOCK_THRESHOLD) || 5,
 
