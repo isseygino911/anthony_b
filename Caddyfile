@@ -3,8 +3,8 @@
 # Two separate subdomains, each its own site block — Caddy handles TLS
 # (Let's Encrypt) automatically per-domain once DNS for both subdomains
 # points at this Hostinger VPS; no explicit TLS config needed here.
-#   - anthony.isseylab.com      the frontend (static Vite build)
-#   - anthony-api.isseylab.com  this backend API (Express, PM2-managed on
+#   - www.luminationsign.store  the frontend (static Vite build)
+#   - api.luminationsign.store  this backend API (Express, PM2-managed on
 #                                localhost:4002, ecosystem.config.js)
 # The frontend calls the API directly via its own absolute VITE_API_URL, so
 # the frontend site block no longer reverse-proxies anything itself.
@@ -17,18 +17,24 @@
 # actually lands on the target server — this assumes the sibling layout
 # above.
 
-anthony-api.isseylab.com {
+api.luminationsign.store {
 	# Express (app.js) already mounts all routes under /api internally, and
 	# the client builds full /api/* paths into its absolute VITE_API_URL, so
 	# this domain has nothing else to serve — forward everything as-is.
 	reverse_proxy localhost:4002
 }
 
-anthony.isseylab.com {
+www.luminationsign.store {
 	# Static Vite build, with SPA fallback so client-side routes
 	# (react-router-dom) resolve to index.html.
 	root * /var/www/anthony-ecom-client/dist
 	encode gzip
 	try_files {path} /index.html
 	file_server
+}
+
+# Apex → www, so visitors hitting luminationsign.store land on the canonical
+# origin the cookies and CORS config are issued for.
+luminationsign.store {
+	redir https://www.luminationsign.store{uri} permanent
 }
