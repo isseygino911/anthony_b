@@ -158,6 +158,11 @@ function updateAdminNotes(id, adminNotes, trx = db) {
   return trx(TABLE).where({ id }).update({ admin_notes: adminNotes, updated_at: new Date() });
 }
 
+// Promotes/removes a design from the public galleries (see listShowcase).
+function setShowcased(id, isShowcased, trx = db) {
+  return trx(TABLE).where({ id }).update({ is_showcased: Boolean(isShowcased), updated_at: new Date() });
+}
+
 // Designs never confirmed into an order (product_id still null) whose
 // images haven't already been purged, older than cutoffDate — candidates
 // for scripts/neon-design-cleanup.js. The row itself is never deleted, only
@@ -188,10 +193,12 @@ function purgeImages(id, inputPayloadWithoutImages, trx = db) {
 
 // Public landing-page gallery — most recent finished designs, image-only
 // (no input_payload/admin_notes exposed; see customNeonDesign.service.js).
+// is_showcased gates it: designs are opt-in, so a customer's generation only
+// appears here once an admin promotes it (see setShowcased).
 function listShowcase(limit = 10, trx = db) {
   return trx(TABLE)
     .select('id', 'design_type', 'size', 'generated_image_url')
-    .where({ status: 'ready' })
+    .where({ status: 'ready', is_showcased: true })
     .whereNotNull('generated_image_url')
     .whereNull('images_purged_at')
     .orderBy('created_at', 'desc')
@@ -260,6 +267,7 @@ module.exports = {
   requeue,
   confirm,
   updateAdminNotes,
+  setShowcased,
   listShowcase,
   listAdmin,
   countAdmin,

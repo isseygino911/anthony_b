@@ -90,6 +90,15 @@ router.patch(
   requireAdmin,
   customNeonDesignsController.updateDesignAdminNotes
 );
+// Gallery curation toggle. On its own sub-path rather than folded into the
+// PATCH above, which is the admin-notes endpoint — same separation as
+// PATCH /admin/products/:id/status.
+router.patch(
+  '/admin/custom-neon-designs/:id/showcase',
+  requireAuth,
+  requireAdmin,
+  customNeonDesignsController.setDesignShowcased
+);
 // Publishes a design as a real catalog product. Separate from the customer
 // confirm flow, and intentionally ignores design ownership — see
 // createProductFromDesign in customNeonDesign.service.js.

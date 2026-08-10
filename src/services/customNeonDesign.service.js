@@ -66,6 +66,7 @@ async function shapeDesign(row) {
     generatedImageUrl: await signImageUrl(row.generated_image_url),
     imagesPurgedAt: row.images_purged_at,
     productId: row.product_id,
+    isShowcased: Boolean(row.is_showcased),
     adminNotes: row.admin_notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -362,6 +363,21 @@ async function updateAdminNotes(id, adminNotes) {
   return shapeDesign(await customNeonDesignModel.findById(id));
 }
 
+// Promotes a design into the public galleries, or removes it. Only the
+// enable direction is guarded: listShowcase would silently skip a design
+// without a finished preview, so allowing it would leave an admin looking at
+// an "on" toggle for something that never appears. Hiding always works —
+// including for a promoted design whose images were later purged.
+async function setShowcased(id, isShowcased) {
+  const row = await customNeonDesignModel.findById(id);
+  if (!row) throw ApiError.notFound('Design not found');
+  if (isShowcased && (row.status !== 'ready' || !row.generated_image_url || row.images_purged_at)) {
+    throw ApiError.badRequest('Only a finished design with a preview can be shown in the gallery');
+  }
+  await customNeonDesignModel.setShowcased(id, isShowcased);
+  return shapeDesign(await customNeonDesignModel.findById(id));
+}
+
 // Admin "Custom Neon Usage" tab — one row per user who has ever generated a
 // design, with counts + last-activity timestamp, so admins can see who's
 // using the feature (and spot anyone worth reviewing against the
@@ -411,5 +427,6 @@ module.exports = {
   listAdmin,
   getAdmin,
   updateAdminNotes,
+  setShowcased,
   getUsageByUser,
 };

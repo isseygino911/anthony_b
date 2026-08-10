@@ -86,6 +86,11 @@ const updateDesignAdminNotes = asyncHandler(async (req, res) => {
   res.status(200).json(design);
 });
 
+const setDesignShowcased = asyncHandler(async (req, res) => {
+  const design = await customNeonDesignService.setShowcased(Number(req.params.id), Boolean(req.body.is_showcased));
+  res.status(200).json(design);
+});
+
 // Admin "Create product" on the Custom Neon Designs page. Name/price default
 // from the design so a one-off publish needs no typing, but every field is
 // overridable because this produces a real catalog listing, not the hidden
@@ -128,6 +133,7 @@ module.exports = {
   listDesignsAdmin,
   getDesignAdmin,
   updateDesignAdminNotes,
+  setDesignShowcased,
   createProductFromDesign,
   listUsageAdmin,
 };
