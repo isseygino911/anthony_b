@@ -47,17 +47,48 @@ const adminAgentLimiter = rateLimit({
 });
 
 // Custom neon design create/regenerate each spend a Gemini image-generation
-// call — capped per logged-in user (not per-IP, since these routes require
-// auth) rather than the default IP-based key, so the limit tracks token
-// usage per account regardless of shared/NATed IPs.
+// call. Keyed per identity, NOT per IP: these routes allow anonymous
+// generation, and an office/campus/carrier-NAT shares one public IP, so
+// IP-keying gave a whole building a combined 2/min — one visitor's preview
+// locked out everyone else on their network. Signed-in users get more headroom
+// than anonymous ones; an account is the accountability mechanism. The per-IP
+// backstop below still caps a visitor who clears their cookie to mint a fresh
+// anon session.
 const neonGenerationLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 2,
+  limit: (req) => (req.user ? 5 : 2),
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user ? `user:${req.user.id}` : req.ip),
+  keyGenerator: (req) => {
+    if (req.user) return `user:${req.user.id}`;
+    if (req.anonSessionId) return `anon:${req.anonSessionId}`;
+    // Unreachable given maybeAnonSession runs first (customNeonDesigns.routes.js),
+    // but keying on undefined would drop every such caller into one shared
+    // bucket — fail closed on the IP rather than silently merging identities.
+    return `ip:${req.ip}`;
+  },
   message: {
     error: { code: 'RATE_LIMITED', message: 'Too many design generations — please wait a minute and try again' },
+  },
+});
+
+// Abuse backstop for anonymous generation. The anon_session_id cookie is
+// unsigned and its value is the row's primary key, so a visitor can reset
+// their per-session budget just by clearing cookies — each reset would
+// otherwise buy unlimited paid Gemini calls. Deliberately loose enough that a
+// shared office/campus IP never reaches it in normal use (that was the bug
+// the limiter above fixes), tight enough to stop a scripted loop.
+const neonGenerationIpLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => Boolean(req.user), // signed-in callers are already keyed per account
+  message: {
+    error: {
+      code: 'RATE_LIMITED',
+      message: 'Too many design generations from this network — please wait a minute and try again',
+    },
   },
 });
 
@@ -78,5 +109,6 @@ module.exports = {
   assistantLimiter,
   adminAgentLimiter,
   neonGenerationLimiter,
+  neonGenerationIpLimiter,
   newsletterLimiter,
 };

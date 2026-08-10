@@ -8,7 +8,7 @@ const {
   COOKIE_NAME: AUTH_COOKIE_NAME,
 } = require('../middleware/auth.middleware');
 const { ensureAnonSession } = require('../middleware/anonSession.middleware');
-const { neonGenerationLimiter } = require('../middleware/rateLimit.middleware');
+const { neonGenerationLimiter, neonGenerationIpLimiter } = require('../middleware/rateLimit.middleware');
 const ApiError = require('../utils/apiError');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -44,9 +44,13 @@ function maybeAnonSession(req, res, next) {
 
 router.use('/custom-neon-designs', attachUserIfPresent, rejectStaleAuthCookie, maybeAnonSession);
 
-// Generation-triggering routes only — 2 per user per minute (rateLimit.middleware.js).
+// Generation-triggering routes only. Two tiers (rateLimit.middleware.js): a
+// per-network backstop for anonymous callers, then a per-identity cap —
+// 5/min signed in, 2/min per anon session. The IP backstop runs first so the
+// cheaper check short-circuits before the per-identity one.
 router.post(
   '/custom-neon-designs',
+  neonGenerationIpLimiter,
   neonGenerationLimiter,
   upload.single('file'),
   customNeonDesignsController.createDesign
@@ -59,6 +63,7 @@ router.get('/custom-neon-designs/active', customNeonDesignsController.getActiveD
 router.get('/custom-neon-designs/:id', customNeonDesignsController.getDesign);
 router.post(
   '/custom-neon-designs/:id/regenerate',
+  neonGenerationIpLimiter,
   neonGenerationLimiter,
   customNeonDesignsController.regenerateDesign
 );
