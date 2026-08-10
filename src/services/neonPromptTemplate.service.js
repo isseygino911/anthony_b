@@ -13,11 +13,22 @@ const SIZE_LABELS = {
   large: '36 inches by 36 inches',
 };
 
+// Phrased the way real neon tubing is described rather than as bare colour
+// names — "electric blue" reads to the model as neon, "blue" reads as paint.
+// Must stay in sync with NEON_COLORS in customNeonDesign.service.js, which is
+// the validation whitelist; describeColor() falls back to the raw value, so a
+// missing entry here degrades quietly instead of erroring.
 const COLOR_LABELS = {
   amber: 'warm amber/gold',
   pink: 'hot pink/magenta',
   blue: 'electric blue',
   white: 'cool white',
+  red: 'deep ruby red',
+  green: 'vivid emerald green',
+  purple: 'rich violet/purple',
+  orange: 'bright tangerine orange',
+  'ice-blue': 'pale icy blue',
+  'warm-white': 'soft warm white',
 };
 
 function describeSize(size) {

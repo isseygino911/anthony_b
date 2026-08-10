@@ -17,7 +17,22 @@ const CUSTOM_NEON_CATEGORY_SLUG = 'custom-neon-signs';
 // Not admin-configurable today — revisit if pricing needs to change per-design.
 const SIZE_PRICES = { small: 249.99, medium: 399.99, large: 524.99 };
 const SIZE_DIMENSIONS = { small: '12"x12"', medium: '24"x24"', large: '36"x36"' };
-const NEON_COLORS = ['amber', 'pink', 'blue', 'white'];
+// Whitelist for the neon_color column (varchar(32), not an enum — no migration
+// needed to extend this). Every value must also have a COLOR_LABELS entry in
+// neonPromptTemplate.service.js: that label is what actually reaches Gemini, so
+// a value added here but not there silently generates the wrong colour.
+const NEON_COLORS = [
+  'amber',
+  'pink',
+  'blue',
+  'white',
+  'red',
+  'green',
+  'purple',
+  'orange',
+  'ice-blue',
+  'warm-white',
+];
 
 function assertSizeAndColor(size, neonColor) {
   if (!SIZE_PRICES[size]) throw ApiError.badRequest('Invalid size');
