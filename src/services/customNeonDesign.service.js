@@ -17,10 +17,12 @@ const CUSTOM_NEON_CATEGORY_SLUG = 'custom-neon-signs';
 // Not admin-configurable today — revisit if pricing needs to change per-design.
 const SIZE_PRICES = { small: 249.99, medium: 399.99, large: 524.99 };
 const SIZE_DIMENSIONS = { small: '12"x12"', medium: '24"x24"', large: '36"x36"' };
-// Whitelist for the neon_color column (varchar(32), not an enum — no migration
-// needed to extend this). Every value must also have a COLOR_LABELS entry in
-// neonPromptTemplate.service.js: that label is what actually reaches Gemini, so
-// a value added here but not there silently generates the wrong colour.
+// Preset whitelist for the neon_color column (varchar(32), not an enum — no
+// migration needed to extend this). Every value must also have a COLOR_LABELS
+// entry in neonPromptTemplate.service.js: that label is what actually reaches
+// Gemini, so a value added here but not there silently generates the wrong
+// colour. Customer-picked colours are not listed here — they take the
+// "custom:#rrggbb" form validated by CUSTOM_COLOR_RE below.
 const NEON_COLORS = [
   'amber',
   'pink',
@@ -34,9 +36,44 @@ const NEON_COLORS = [
   'warm-white',
 ];
 
+// The custom colour picker stores its value inline in the same column as
+// "custom:#rrggbb" (14 chars — comfortably inside varchar(32)), so it needs
+// neither a second column nor a migration. Strict and canonical on purpose:
+// lowercase 6-digit hex only, no /i flag, no 3-digit shorthand, anchored at
+// both ends. That keeps arbitrary user text out of the column, out of the
+// customer-facing product description, and out of the Gemini prompt.
+// describeHex() in neonPromptTemplate.service.js is the counterpart that turns
+// the hex into prompt wording — keep the two in sync the same way NEON_COLORS
+// and COLOR_LABELS are kept in sync.
+const CUSTOM_COLOR_RE = /^custom:#[0-9a-f]{6}$/;
+
+// Lowercases custom values so one colour has exactly one stored form. This is
+// load-bearing, not tidiness: the storefront decides whether the rendered
+// preview is stale with a plain === on this string (matchesGenerated in
+// pages/storefront/CustomNeon.tsx), so allowing both "custom:#FF2D95" and
+// "custom:#ff2d95" would make the same colour compare unequal and block
+// Confirm. Presets and non-strings pass through untouched.
+function normalizeNeonColor(neonColor) {
+  if (typeof neonColor !== 'string') return neonColor;
+  return neonColor.startsWith('custom:') ? neonColor.toLowerCase() : neonColor;
+}
+
+function isValidNeonColor(neonColor) {
+  // String(... ?? '') so null/undefined still fail rather than throwing.
+  return NEON_COLORS.includes(neonColor) || CUSTOM_COLOR_RE.test(String(neonColor ?? ''));
+}
+
+// The stored value is a machine token for custom picks; anything customer- or
+// admin-facing goes through here so it reads "custom #FF2D95" rather than
+// "custom:#ff2d95". Mirrored by formatNeonColor() in anthony_f/src/api/customNeon.ts.
+function describeColorForCustomer(neonColor) {
+  const match = /^custom:(#[0-9a-f]{6})$/.exec(String(neonColor ?? ''));
+  return match ? `custom ${match[1].toUpperCase()}` : neonColor;
+}
+
 function assertSizeAndColor(size, neonColor) {
   if (!SIZE_PRICES[size]) throw ApiError.badRequest('Invalid size');
-  if (!NEON_COLORS.includes(neonColor)) throw ApiError.badRequest('Invalid neon_color');
+  if (!isValidNeonColor(neonColor)) throw ApiError.badRequest('Invalid neon_color');
 }
 
 function toModelIdentity(identity) {
@@ -94,6 +131,9 @@ async function createDesign(identity, { designType, file, strokes, text, fontFam
   assertIdentity(identity);
   if (!file) throw ApiError.badRequest('No design image uploaded');
   if (!['upload', 'draw', 'text'].includes(designType)) throw ApiError.badRequest('Invalid design_type');
+  // Canonicalise before validating so the stored form is the one the
+  // storefront's stale-preview comparison expects (see normalizeNeonColor).
+  neonColor = normalizeNeonColor(neonColor);
   assertSizeAndColor(size, neonColor);
 
   const active = await findActive(identity);
@@ -152,6 +192,7 @@ async function getActiveDesign(identity) {
 // rather than silently keeping the ones from the first generation.
 async function regenerate(id, identity, { size, neonColor } = {}) {
   const row = await getOwnedDesign(id, identity);
+  neonColor = normalizeNeonColor(neonColor);
   if (size !== undefined || neonColor !== undefined) assertSizeAndColor(size, neonColor);
 
   const active = await findActive(identity);
@@ -192,7 +233,10 @@ async function confirmDesign(id, identity) {
       {
         category_id: category.id,
         name: `Custom Neon Design #${row.id}`,
-        description: `Custom AI-generated neon sign design (${SIZE_DIMENSIONS[row.size]}, ${row.neon_color}).`,
+        // describeColorForCustomer keeps the raw "custom:#rrggbb" token out of
+        // customer-visible order text. anthony_f/src/pages/admin/ProductForm.tsx
+        // rebuilds this same string client-side — keep the two in step.
+        description: `Custom AI-generated neon sign design (${SIZE_DIMENSIONS[row.size]}, ${describeColorForCustomer(row.neon_color)}).`,
         price,
         sku: `NEON-${row.id}`,
         stock_quantity: 9999,
@@ -430,6 +474,10 @@ async function getUsageByUser({ page, pageSize }) {
 module.exports = {
   SIZE_PRICES,
   SIZE_DIMENSIONS,
+  CUSTOM_COLOR_RE,
+  isValidNeonColor,
+  normalizeNeonColor,
+  describeColorForCustomer,
   createDesign,
   getDesign,
   getActiveDesign,

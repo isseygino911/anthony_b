@@ -31,12 +31,96 @@ const COLOR_LABELS = {
   'warm-white': 'soft warm white',
 };
 
+// Customer-picked colours arrive as "custom:#rrggbb" (validated by
+// CUSTOM_COLOR_RE in customNeonDesign.service.js). They are deliberately not in
+// COLOR_LABELS — there are 16 million of them — so describeColor() routes them
+// through describeHex() instead, which produces the same style of phrase from
+// the hex. A bare hex must never reach the prompt: an image model renders
+// "#ff2d95" as literal text on the sign rather than as a tube colour, which is
+// exactly what the instruction's "no text added outside the sign" clause fights.
+const CUSTOM_HEX_RE = /^custom:#([0-9a-f]{6})$/;
+
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(0, 2), 16) / 255;
+  const g = parseInt(hex.slice(2, 4), 16) / 255;
+  const b = parseInt(hex.slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return { h: 0, s: 0, l };
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return { h: h * 60, s, l };
+}
+
+// Ordered, non-overlapping hue windows, phrased as neon tubing rather than as
+// bare colour names for the same reason COLOR_LABELS is — see the note above it.
+const HUE_BUCKETS = [
+  { max: 12, name: 'red' },
+  { max: 25, name: 'red-orange' },
+  { max: 42, name: 'tangerine orange' },
+  { max: 58, name: 'amber/gold' },
+  { max: 70, name: 'yellow' },
+  { max: 90, name: 'lime green' },
+  { max: 150, name: 'emerald green' },
+  { max: 175, name: 'spring green/teal' },
+  { max: 195, name: 'cyan/turquoise' },
+  { max: 215, name: 'azure blue' },
+  { max: 250, name: 'electric blue' },
+  { max: 275, name: 'indigo/violet-blue' },
+  { max: 295, name: 'violet/purple' },
+  { max: 320, name: 'magenta' },
+  { max: 345, name: 'hot pink' },
+  { max: 360, name: 'red' },
+];
+
+function hueName(h) {
+  return (HUE_BUCKETS.find((bucket) => h < bucket.max) || HUE_BUCKETS[0]).name;
+}
+
+// Below ~10% saturation hue is noise, so branch on lightness instead and reuse
+// the exact wording of the white presets — a custom near-white should generate
+// the same way picking 'white'/'warm-white' does.
+function neutralName(h, l) {
+  if (l >= 0.88) return h >= 20 && h <= 70 ? 'soft warm white' : 'cool white';
+  if (l >= 0.6) return 'pale silvery white';
+  if (l >= 0.3) return 'dim smoky grey-white';
+  return 'very dim grey-white';
+}
+
+// Qualifiers stack the way the presets read: "pale icy blue", "deep ruby red",
+// "vivid emerald green".
+function describeHex(hex) {
+  const { h, s, l } = hexToHsl(hex);
+  // Very light tints read as white to the eye however saturated the maths says
+  // they are (#fff8e7 is 100% saturated but is plainly an off-white), so the
+  // lightness test has to come before the saturation one.
+  if (l >= 0.93) return neutralName(h, l);
+  if (s <= 0.1) return neutralName(h, l);
+
+  const base = hueName(h);
+  if (l >= 0.82) return `pale ${base}`;
+  if (l <= 0.3) return `deep ${base}`;
+  if (s >= 0.85 && l >= 0.4 && l <= 0.65) return `vivid ${base}`;
+  if (s <= 0.35) return `muted ${base}`;
+  return base;
+}
+
 function describeSize(size) {
   return SIZE_LABELS[size] || 'medium-sized';
 }
 
 function describeColor(neonColor) {
-  return COLOR_LABELS[neonColor] || neonColor || 'warm amber/gold';
+  if (COLOR_LABELS[neonColor]) return COLOR_LABELS[neonColor];
+  const match = typeof neonColor === 'string' ? CUSTOM_HEX_RE.exec(neonColor) : null;
+  if (match) return describeHex(match[1]);
+  // Unchanged legacy fallback: an unknown preset still degrades to the raw
+  // value rather than erroring the worker mid-generation.
+  return neonColor || 'warm amber/gold';
 }
 
 function buildInstruction({ designType, size, neonColor }) {
@@ -72,4 +156,4 @@ function buildRequest({ designType, size, neonColor, imageBase64, imageMimeType 
   };
 }
 
-module.exports = { buildRequest, buildInstruction };
+module.exports = { buildRequest, buildInstruction, describeColor, describeHex };

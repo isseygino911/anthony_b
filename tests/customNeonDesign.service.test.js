@@ -273,3 +273,88 @@ describe('customNeonDesign.service.getDesign / regenerate — ownership gating',
     expect(design.lastError).toBeNull();
   });
 });
+
+// The custom colour picker stores customer-picked colours inline in the same
+// neon_color column as "custom:#rrggbb". The riskiest path is confirmDesign():
+// it re-validates the *stored* value before minting the product, so a value
+// that createDesign accepts but confirmDesign rejects would let a customer
+// generate a preview they can never buy.
+describe('customNeonDesign.service — custom colours', () => {
+  it('confirms a design stored with a custom colour and mints its product', async () => {
+    const id = await seedDesign({ neon_color: 'custom:#ff2d95' });
+
+    const { design, cart } = await customNeonDesignService.confirmDesign(id, anonIdentity);
+
+    expect(design.neonColor).toBe('custom:#ff2d95');
+    expect(design.productId).toBeTruthy();
+    expect(cart.items).toHaveLength(1);
+  });
+
+  it('keeps the raw token out of the customer-visible product description', async () => {
+    const id = await seedDesign({ neon_color: 'custom:#ff2d95' });
+    const { design } = await customNeonDesignService.confirmDesign(id, anonIdentity);
+
+    const product = await db('products').where({ id: design.productId }).first();
+    expect(product.description).toBe('Custom AI-generated neon sign design (24"x24", custom #FF2D95).');
+    expect(product.description).not.toContain('custom:#');
+  });
+
+  it('still prices by size only — colour never changes the price', async () => {
+    const custom = await seedDesign({ size: 'small', neon_color: 'custom:#00ffcc' });
+    const preset = await seedDesign({ size: 'small', neon_color: 'blue', session_id: 'anon-session-2' });
+
+    const a = await customNeonDesignService.confirmDesign(custom, anonIdentity);
+    const b = await customNeonDesignService.confirmDesign(preset, { user: null, anonSessionId: 'anon-session-2' });
+
+    expect(a.design.price).toBe(249.99);
+    expect(b.design.price).toBe(a.design.price);
+  });
+
+  it.each([
+    ['uppercase hex', 'custom:#FF2D95'],
+    ['3-digit shorthand', 'custom:#fff'],
+    ['non-hex characters', 'custom:#gggggg'],
+    ['missing hex', 'custom:'],
+    ['a colour name', 'custom:red'],
+    ['trailing junk', 'custom:#ff2d95; DROP TABLE products'],
+  ])('rejects %s at confirm time', async (_label, neonColor) => {
+    const id = await seedDesign({ neon_color: neonColor });
+    await expect(customNeonDesignService.confirmDesign(id, anonIdentity)).rejects.toMatchObject({
+      statusCode: 400,
+    });
+  });
+
+  it('normalises an uppercase custom colour to lowercase on regenerate', async () => {
+    // One colour must have exactly one stored form: the storefront decides
+    // whether the preview is stale with a plain === on this string.
+    const id = await seedDesign({ status: 'failed' });
+    const design = await customNeonDesignService.regenerate(id, anonIdentity, {
+      size: 'large',
+      neonColor: 'custom:#FF2D95',
+    });
+    expect(design.neonColor).toBe('custom:#ff2d95');
+  });
+
+  it('rejects an invalid custom colour on regenerate', async () => {
+    const id = await seedDesign({ status: 'failed' });
+    await expect(
+      customNeonDesignService.regenerate(id, anonIdentity, { size: 'large', neonColor: 'custom:#zzzzzz' }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('accepts every preset and the custom form, and nothing else', () => {
+    const { isValidNeonColor } = customNeonDesignService;
+    for (const preset of ['amber', 'pink', 'blue', 'white', 'red', 'green', 'purple', 'orange', 'ice-blue', 'warm-white']) {
+      expect(isValidNeonColor(preset)).toBe(true);
+    }
+    expect(isValidNeonColor('custom:#ff2d95')).toBe(true);
+    expect(isValidNeonColor(null)).toBe(false);
+    expect(isValidNeonColor(undefined)).toBe(false);
+    expect(isValidNeonColor('')).toBe(false);
+    expect(isValidNeonColor('chartreuse')).toBe(false);
+  });
+
+  it('encodes a custom colour well inside the varchar(32) column', () => {
+    expect('custom:#ff2d95'.length).toBe(14);
+  });
+});
