@@ -339,6 +339,29 @@ OAuth callback require the CSRF header to match the CSRF cookie.
 | PATCH | `/api/admin/notifications/:id/read` | Admin | — | `200 {Notification}` |
 | PATCH | `/api/admin/notifications/read-all` | Admin | — | `204` |
 
+### 4.9a Contact Forms (storefront enquiries)
+One reusable form serves every "get in touch" surface on the storefront; the
+surfaces differ only by `topic`, so submissions all land in
+`contact_submissions` and the admin panel filters/groups by that column.
+Submitting requires a logged-in account — that is what ties an enquiry to a
+real identity, and it is the anti-spam mechanism for the public endpoint
+(backed by a per-account rate limit rather than a per-IP one, so a shared
+office NAT cannot lock colleagues out). Each submission also raises a
+`contact_submission` notification, so the existing admin bell surfaces new
+enquiries without polling.
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| POST | `/api/contact` | Customer | `{topic: 'installer'\|'designer', name, email, phone, company?, message}` | `201 {ContactSubmission}` (rate-limited per account; `company` is the only optional field) |
+| GET | `/api/admin/contact/submissions` | Admin | query: `topic, status, page, pageSize` | `200 {items: [ContactSubmission], total, summary: [{topic, label, total, new}]}` — `summary` covers every topic regardless of the active filter, so the category tabs stay accurate |
+| GET | `/api/admin/contact/submissions/:id` | Admin | — | `200 {ContactSubmission}` |
+| PATCH | `/api/admin/contact/submissions/:id` | Admin | `{status?: 'new'\|'in_progress'\|'closed', adminNotes?}` | `200 {ContactSubmission}` |
+
+Adding a new contact surface means: extend the `topic` enum (MODIFY COLUMN
+migration), add an entry to `TOPICS` in `contact.service.js`, and add one to
+`CONTACT_TOPICS` in the client's `components/contact/contactTopics.ts`. No
+schema redesign, and the form component itself needs no change.
+
 ### 4.10 Revenue Dashboard
 | Method | Path | Auth | Request | Response |
 |---|---|---|---|---|
@@ -767,13 +790,34 @@ PK: composite `(user_id, product_id)`. Indexes: `INDEX (product_id)`.
 | Column | Type | Notes |
 |---|---|---|
 | id | INT UNSIGNED AUTO_INCREMENT | PK |
-| type | ENUM('low_stock') | NOT NULL (single value today; enum kept narrow per less-is-more — extend when a second type is actually needed) |
+| type | ENUM('low_stock','custom_design_ordered','contact_submission') | NOT NULL (extended by migrations 023 and 037 as each new trigger was actually built) |
 | product_id | INT UNSIGNED | FK → `products.id`, NULLABLE, ON DELETE CASCADE |
 | message | VARCHAR(500) | NOT NULL |
 | is_read | TINYINT(1) | NOT NULL DEFAULT 0 |
 | created_at | DATETIME | NOT NULL |
 
 Indexes: `INDEX (is_read)`, `INDEX (created_at)`.
+
+### `contact_submissions`
+One table behind every storefront contact form — see §4.9a. The forms differ
+only by `topic`, so they share this table rather than each getting their own.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | INT UNSIGNED AUTO_INCREMENT | PK |
+| topic | ENUM('installer','designer') | NOT NULL — the contact surface it came from; what the admin panel groups by |
+| user_id | INT UNSIGNED | FK → `users.id`, ON DELETE SET NULL. Always set on insert (the POST route requires auth); nullable only so deleting an account keeps the enquiry history |
+| name | VARCHAR(255) | NOT NULL — snapshot of what the sender typed, not read through the FK: a contractor may give a business contact that differs from their account, and it must survive account deletion |
+| email | VARCHAR(255) | NOT NULL, lower-cased on write (same snapshot rationale) |
+| phone | VARCHAR(50) | NULLABLE in the schema, but required by the service on every submission — the business calls these leads back. Left nullable so an older or non-form-authored row stays representable |
+| company | VARCHAR(255) | NULLABLE (asked for on the installer surface only) |
+| message | TEXT | NOT NULL, capped at 5000 chars in the service so MySQL never silently truncates |
+| status | ENUM('new','in_progress','closed') | NOT NULL DEFAULT 'new' — admin triage |
+| admin_notes | TEXT | NULLABLE, internal only |
+| created_at | DATETIME | NOT NULL |
+| updated_at | DATETIME | NOT NULL |
+
+Indexes: `INDEX (created_at)`, `INDEX (topic, status, created_at)`, `INDEX (user_id)`.
 
 ### `site_theme`
 Single-row table (application enforces exactly one row; no `user_id` scoping

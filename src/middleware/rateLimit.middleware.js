@@ -102,6 +102,23 @@ const newsletterLimiter = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'Too many subscribe attempts, try again later' } },
 });
 
+// Contact form submissions. The route is behind requireAuth, so key on the
+// account rather than the IP: a shared office/campus NAT would otherwise let
+// one sender's enquiries lock out their colleagues (same bug the neon
+// limiter documents above). Generous enough for someone legitimately
+// enquiring about both partnering and a design, tight enough that a
+// compromised account cannot flood the admin inbox.
+const contactLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `user:${req.user.id}`,
+  message: {
+    error: { code: 'RATE_LIMITED', message: 'Too many messages sent — please try again later' },
+  },
+});
+
 module.exports = {
   generalLimiter,
   loginLimiter,
@@ -111,4 +128,5 @@ module.exports = {
   neonGenerationLimiter,
   neonGenerationIpLimiter,
   newsletterLimiter,
+  contactLimiter,
 };

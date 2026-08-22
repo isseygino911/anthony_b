@@ -128,6 +128,21 @@ async function applySchema(db) {
     t.datetime('updated_at');
   });
 
+  await db.schema.createTable('contact_submissions', (t) => {
+    t.increments('id');
+    t.string('topic');
+    t.integer('user_id').nullable();
+    t.string('name');
+    t.string('email');
+    t.string('phone').nullable();
+    t.string('company').nullable();
+    t.text('message');
+    t.string('status').defaultTo('new');
+    t.text('admin_notes').nullable();
+    t.datetime('created_at');
+    t.datetime('updated_at');
+  });
+
   await db.schema.createTable('site_theme', (t) => {
     t.increments('id');
     t.string('brand_name');
