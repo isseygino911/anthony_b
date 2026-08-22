@@ -123,7 +123,7 @@ function describeColor(neonColor) {
   return neonColor || 'warm amber/gold';
 }
 
-function buildInstruction({ designType, size, neonColor }) {
+function buildInstruction({ designType, size, neonColor, sketch }) {
   const sizeText = describeSize(size);
   const colorText = describeColor(neonColor);
 
@@ -133,12 +133,28 @@ function buildInstruction({ designType, size, neonColor }) {
     return `${shared} The sign's design is the exact text and lettering shown in the attached image — preserve the exact characters and their layout/style, do not alter the wording.`;
   }
   if (designType === 'draw') {
-    return `${shared} The attached image is a hand-drawn sketch — trace its outline faithfully as the sign's shape rather than inventing new details, while still converting the flat sketch lines into realistic glowing neon tubing.`;
+    // With an interpretation in hand the task changes shape entirely. Without
+    // one the model is asked to infer intent from pixels while copying them,
+    // which it resolves by copying — the failure that produced an
+    // unrecognisable tangle from a Mickey-Mouse-shaped sketch. Naming the
+    // subject up front turns it into an ordinary drawing task: render *this*,
+    // and use the sketch for layout only.
+    if (sketch?.subject) {
+      const composition = sketch.composition
+        ? ` The customer's layout, which you should follow: ${sketch.composition}.`
+        : '';
+      return `${shared} The attached image is a rough freehand sketch, drawn in seconds with a mouse or fingertip, of the following subject: ${sketch.subject}.${composition} Draw that subject properly as a bold cartoon-style neon sign with real personality — the way a professional sign artist would reinterpret a customer's napkin sketch. Use the sketch only for layout, orientation and proportion; do NOT trace its lines, reproduce its wobble, or preserve its mistakes. The finished sign must be a clean, confident, instantly recognisable rendering of ${sketch.subject}, drawn correctly even where the sketch is crude, incomplete or badly proportioned. Render it with confident sweeping curves and lively line weight, exaggerated and simplified shapes, chunky readable forms, playful slightly-oversized proportions on expressive features such as eyes, smiles, ears or flourishes, and clean negative space that lets the shape read instantly from across a room. Use the minimum number of elegant continuous tube runs a real neon fabricator would bend. For this sketch-based sign, stage it more dramatically than a plain product shot: darken the room further so the sign is the single vivid light source, let it throw a rich saturated pool of coloured glow across the wall with deep shadow falloff beyond it, and push the contrast so the tube cores read almost white-hot against the dark. The result must look like a bold, characterful piece of neon art a customer would be excited to hang, never like an amateur doodle traced in light.`;
+    }
+
+    // Unrecognised sketch: the interpreter was unavailable or not confident
+    // enough, so fall back to cleaning up what was actually drawn rather than
+    // inventing a subject the customer never asked for.
+    return `${shared} The attached image is a rough freehand sketch drawn with a mouse or fingertip, so treat it as a guide to the intended subject and composition, not as artwork to copy stroke for stroke. Redraw it as a bold cartoon-style neon sign with real personality — the way a professional sign artist would reinterpret a customer's napkin sketch. Keep the same subject, silhouette, orientation and layout the sketch is clearly aiming at, but smooth every wobbly or jittery line into a confident continuous curve, straighten lines meant to be straight, even out circles and arcs, close accidental gaps, merge doubled or overshooting strokes into one tube, correct lopsided proportions and symmetry, and drop stray marks or smudges. Interpret ambiguous scribbles as the nearest sensible version of what the drawing depicts. Push the result toward stylised cartoon character rather than literal realism: confident sweeping curves with lively line weight, exaggerated and simplified shapes, chunky readable forms, playful slightly-oversized proportions on any expressive feature such as eyes, smiles, ears or flourishes, and clean negative space that lets the shape read instantly from across a room. Simplify fussy detail into the minimum number of elegant tube runs a real neon fabricator would bend, since neon tubing is bent on a jig in smooth continuous sections and physically cannot look shaky or hand-jittered. For this sketch-based sign, stage it more dramatically than a plain product shot: darken the room further so the sign is the single vivid light source, let it throw a rich saturated pool of coloured glow across the wall with deep shadow falloff beyond it, and push the contrast so the tube cores read almost white-hot against the dark. The finished sign must look like a bold, characterful piece of neon art a customer would be excited to hang, never like an amateur doodle traced in light.`;
   }
   return `${shared} The attached image is the reference design/logo/artwork — preserve its recognizable silhouette and proportions as the sign's shape.`;
 }
 
-function buildRequest({ designType, size, neonColor, imageBase64, imageMimeType }) {
+function buildRequest({ designType, size, neonColor, imageBase64, imageMimeType, sketch }) {
   return {
     model: imageModel,
     contents: [
@@ -146,7 +162,7 @@ function buildRequest({ designType, size, neonColor, imageBase64, imageMimeType 
         role: 'user',
         parts: [
           { inlineData: { mimeType: imageMimeType, data: imageBase64 } },
-          { text: buildInstruction({ designType, size, neonColor }) },
+          { text: buildInstruction({ designType, size, neonColor, sketch }) },
         ],
       },
     ],

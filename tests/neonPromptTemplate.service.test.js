@@ -100,4 +100,59 @@ describe('buildInstruction', () => {
     const instruction = buildInstruction({ designType: 'upload', size: 'large', neonColor: 'blue' });
     expect(instruction).toContain('using electric blue neon tubing');
   });
+
+  it('gives draw mode the cartoon styling and dramatic staging', () => {
+    const instruction = buildInstruction({ designType: 'draw', size: 'medium', neonColor: 'pink' });
+    expect(instruction).toContain('cartoon');
+    expect(instruction).toContain('dramatically');
+    // The cleanup direction has to survive alongside the styling — styling a
+    // sketch without de-wobbling it just yields a characterful shaky sign.
+    expect(instruction).toContain('smooth every wobbly');
+  });
+
+  // A recognised sketch reframes the whole task: the model is told what to
+  // draw and demoted to using the sketch for layout, instead of being asked to
+  // infer intent from lines it is simultaneously copying.
+  it('names the identified subject and forbids tracing when a sketch is read', () => {
+    const sketch = {
+      subject: 'a cartoon mouse mascot head with two large round ears',
+      composition: 'head centred with two circular ears at the top',
+      confidence: 0.9,
+    };
+    const instruction = buildInstruction({ designType: 'draw', size: 'medium', neonColor: 'pink', sketch });
+    expect(instruction).toContain(sketch.subject);
+    expect(instruction).toContain(sketch.composition);
+    expect(instruction).toContain('do NOT trace its lines');
+  });
+
+  it('falls back to the unguided sketch wording when no subject was identified', () => {
+    const instruction = buildInstruction({ designType: 'draw', size: 'medium', neonColor: 'pink', sketch: null });
+    expect(instruction).toContain('smooth every wobbly');
+    expect(instruction).not.toContain('do NOT trace its lines');
+  });
+
+  it('omits the layout clause when the model returned no composition', () => {
+    const sketch = { subject: 'a heart with an arrow through it', composition: '', confidence: 0.8 };
+    const instruction = buildInstruction({ designType: 'draw', size: 'medium', neonColor: 'pink', sketch });
+    expect(instruction).toContain(sketch.subject);
+    expect(instruction).not.toContain("The customer's layout");
+  });
+
+  // An interpretation must never leak into the other two modes — a typed name
+  // is already unambiguous and an uploaded logo must stay faithful.
+  it.each(['text', 'upload'])('ignores a sketch interpretation in %s mode', (designType) => {
+    const sketch = { subject: 'a dragon', composition: 'centred', confidence: 0.9 };
+    const instruction = buildInstruction({ designType, size: 'medium', neonColor: 'pink', sketch });
+    expect(instruction).not.toContain('a dragon');
+  });
+
+  // The cartoon/dramatic wording is deliberately scoped to hand-drawn sketches:
+  // a typed name or an uploaded logo must still generate as a faithful,
+  // straight product shot. Moving any of it into the shared preamble would
+  // restyle those two silently, so this is the guard against that.
+  it.each(['text', 'upload'])('leaves %s mode free of the sketch styling', (designType) => {
+    const instruction = buildInstruction({ designType, size: 'medium', neonColor: 'pink' });
+    expect(instruction).not.toContain('cartoon');
+    expect(instruction).not.toContain('dramatically');
+  });
 });

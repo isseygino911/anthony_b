@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { genAI, isConfigured: geminiConfigured } = require('../src/config/gemini');
 const neonPromptTemplateService = require('../src/services/neonPromptTemplate.service');
+const neonSketchInterpreterService = require('../src/services/neonSketchInterpreter.service');
 
 function parseArgs(argv) {
   const positional = [];
@@ -71,15 +72,32 @@ async function main() {
   const imageBuffer = fs.readFileSync(inputPath);
   const imageMimeType = /\.png$/i.test(inputPath) ? 'image/png' : 'image/jpeg';
 
+  const imageBase64 = imageBuffer.toString('base64');
+
+  // Mirrors the worker: sketches get the vision pass first. Printing what the
+  // sketch was read as is the point of the tuning loop — a bad result is
+  // usually a misread subject, not bad prompt wording, and the two need
+  // different fixes.
+  let sketch = null;
+  if (designType === 'draw') {
+    sketch = await neonSketchInterpreterService.interpretSketch({ imageBase64, imageMimeType });
+    console.log(
+      sketch
+        ? `[tune-neon-prompt] sketch read as: ${JSON.stringify(sketch, null, 2)}`
+        : '[tune-neon-prompt] sketch not confidently identified — generating unguided'
+    );
+  }
+
   const request = neonPromptTemplateService.buildRequest({
     designType,
     size,
     neonColor,
-    imageBase64: imageBuffer.toString('base64'),
+    imageBase64,
     imageMimeType,
+    sketch,
   });
 
-  console.log(`[tune-neon-prompt] prompt: ${neonPromptTemplateService.buildInstruction({ designType, size, neonColor })}`);
+  console.log(`[tune-neon-prompt] prompt: ${neonPromptTemplateService.buildInstruction({ designType, size, neonColor, sketch })}`);
 
   const response = await genAI.models.generateContent(request);
   const generated = extractGeneratedImage(response);

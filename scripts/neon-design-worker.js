@@ -18,6 +18,7 @@ const db = require('../src/config/db');
 const { genAI, isConfigured: geminiConfigured } = require('../src/config/gemini');
 const { isConfigured: s3Configured } = require('../src/config/s3');
 const neonPromptTemplateService = require('../src/services/neonPromptTemplate.service');
+const neonSketchInterpreterService = require('../src/services/neonSketchInterpreter.service');
 const uploadService = require('../src/services/upload.service');
 const customNeonDesignModel = require('../src/models/customNeonDesign.model');
 
@@ -56,12 +57,33 @@ async function processRow(row) {
   if (!imageUrl) throw new Error('Design row has no usable input image URL');
 
   const { buffer, mimetype } = await uploadService.getObjectBuffer(imageUrl);
+  const imageBase64 = buffer.toString('base64');
+
+  // Hand-drawn sketches get a vision pass first: the image model cannot infer
+  // what a crude drawing depicts while it is busy copying it, so identify the
+  // subject up front and hand that to the prompt. Returns null (never throws)
+  // when unavailable or unsure, in which case buildRequest falls back to the
+  // unguided wording and generation proceeds exactly as before.
+  let sketch = null;
+  if (row.design_type === 'draw') {
+    sketch = await neonSketchInterpreterService.interpretSketch({
+      imageBase64,
+      imageMimeType: mimetype,
+    });
+    console.log(
+      sketch
+        ? `[neon-design-worker] design ${row.id} sketch read as "${sketch.subject}" (confidence ${sketch.confidence})`
+        : `[neon-design-worker] design ${row.id} sketch not confidently identified — generating unguided`
+    );
+  }
+
   const request = neonPromptTemplateService.buildRequest({
     designType: row.design_type,
     size: row.size,
     neonColor: row.neon_color,
-    imageBase64: buffer.toString('base64'),
+    imageBase64,
     imageMimeType: mimetype,
+    sketch,
   });
 
   const response = await genAI.models.generateContent(request);
