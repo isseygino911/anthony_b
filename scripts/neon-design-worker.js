@@ -21,6 +21,7 @@ const neonPromptTemplateService = require('../src/services/neonPromptTemplate.se
 const neonSketchInterpreterService = require('../src/services/neonSketchInterpreter.service');
 const uploadService = require('../src/services/upload.service');
 const customNeonDesignModel = require('../src/models/customNeonDesign.model');
+const { runTick } = require('../src/utils/workerLoop');
 
 const POLL_INTERVAL_MS = Number(process.env.NEON_WORKER_POLL_INTERVAL_MS) || 20000;
 // Batch members are now processed concurrently (see tick()), so this bounds
@@ -135,11 +136,7 @@ async function tick() {
 let stopped = false;
 async function loop() {
   if (stopped) return;
-  try {
-    await tick();
-  } catch (err) {
-    console.error('[neon-design-worker] tick failed', err);
-  }
+  await runTick(tick, 'neon-design-worker');
   if (!stopped) setTimeout(loop, POLL_INTERVAL_MS);
 }
 

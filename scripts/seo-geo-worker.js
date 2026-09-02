@@ -21,6 +21,7 @@ const productModel = require('../src/models/product.model');
 const categoryModel = require('../src/models/category.model');
 const productImageModel = require('../src/models/productImage.model');
 const productSeoModel = require('../src/models/productSeo.model');
+const { runTick } = require('../src/utils/workerLoop');
 
 const POLL_INTERVAL_MS = Number(process.env.SEO_WORKER_POLL_INTERVAL_MS) || 20000;
 const BATCH_SIZE = Number(process.env.SEO_WORKER_BATCH_SIZE) || 3;
@@ -140,11 +141,7 @@ async function tick() {
 let stopped = false;
 async function loop() {
   if (stopped) return;
-  try {
-    await tick();
-  } catch (err) {
-    console.error('[seo-geo-worker] tick failed', err);
-  }
+  await runTick(tick, 'seo-geo-worker');
   if (!stopped) setTimeout(loop, POLL_INTERVAL_MS);
 }
 

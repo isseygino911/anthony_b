@@ -17,7 +17,14 @@ const db = knex({
   pool: {
     min: 0,
     max: 10,
-    idleTimeoutMillis: 20000,
+    // The hosted MySQL runs wait_timeout=20s, so the server hangs up on an idle
+    // connection very aggressively. Reaping our own idle connections well
+    // inside that window means we close them before the server does, instead of
+    // racing it and handing a caller a socket the server has already killed
+    // (PROTOCOL_CONNECTION_LOST on the next query). min:0 means idling down to
+    // zero costs nothing — connections are re-established on demand.
+    idleTimeoutMillis: 10000,
+    reapIntervalMillis: 2000,
     acquireTimeoutMillis: 15000,
     createTimeoutMillis: 15000,
   },
