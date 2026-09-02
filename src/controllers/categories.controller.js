@@ -26,9 +26,17 @@ const deleteCategory = asyncHandler(async (req, res) => {
   const existing = await categoryModel.findById(id);
   if (!existing) throw ApiError.notFound('Category not found');
 
+  // Counts soft-deleted products too, because the FK does. Those are invisible
+  // in the admin list, so say so explicitly rather than claiming the category
+  // has products the admin can plainly see it does not.
   const productCount = await categoryModel.countProductsInCategory(id);
   if (productCount > 0) {
-    throw ApiError.conflict('Category still has products assigned to it');
+    const liveCount = await categoryModel.countLiveProductsInCategory(id);
+    throw ApiError.conflict(
+      liveCount > 0
+        ? 'Category still has products assigned to it'
+        : 'Category still has deleted products assigned to it. Reassign them to another category before deleting it.'
+    );
   }
 
   await categoryModel.deleteCategory(id);

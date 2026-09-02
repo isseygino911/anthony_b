@@ -36,7 +36,22 @@ function deleteCategory(id, trx = db) {
   return trx(TABLE).where({ id }).del();
 }
 
+// Counts every product row still pointing at the category, soft-deleted ones
+// included. The products.category_id foreign key is enforced by MySQL against
+// physical rows and knows nothing about deleted_at, so excluding soft-deleted
+// products here would clear the guard and then fail the DELETE with a raw
+// ER_ROW_IS_REFERENCED_2.
 async function countProductsInCategory(categoryId, trx = db) {
+  const row = await trx('products')
+    .where({ category_id: categoryId })
+    .count({ count: '*' })
+    .first();
+  return Number(row.count);
+}
+
+// The subset an admin can actually see in the product list — used only to word
+// the delete-conflict message, never as the FK safety check.
+async function countLiveProductsInCategory(categoryId, trx = db) {
   const row = await trx('products')
     .where({ category_id: categoryId })
     .whereNull('deleted_at')
@@ -53,4 +68,5 @@ module.exports = {
   updateCategory,
   deleteCategory,
   countProductsInCategory,
+  countLiveProductsInCategory,
 };
