@@ -38,6 +38,7 @@ async function resetSchema() {
     t.string('name');
     t.text('description');
     t.decimal('price', 10, 2);
+    t.boolean('is_quote').defaultTo(false);
     t.string('sku');
     t.json('tags').nullable();
     t.integer('stock_quantity').defaultTo(0);
@@ -81,6 +82,8 @@ async function resetSchema() {
     t.string('design_type');
     t.json('input_payload');
     t.string('size').nullable();
+    t.decimal('custom_width_in', 6, 2).nullable();
+    t.decimal('custom_height_in', 6, 2).nullable();
     t.string('neon_color').nullable();
     t.decimal('price', 10, 2).nullable();
     t.string('status').defaultTo('pending');
@@ -356,5 +359,166 @@ describe('customNeonDesign.service — custom colours', () => {
 
   it('encodes a custom colour well inside the varchar(32) column', () => {
     expect('custom:#ff2d95'.length).toBe(14);
+  });
+});
+
+// The fourth size option: the customer types their own dimensions and the
+// design is quoted by hand rather than priced from SIZE_PRICES.
+describe('customNeonDesign.service — custom size', () => {
+  it('confirms a custom-size design into an unpriced product rather than a free one', async () => {
+    const id = await seedDesign({ size: 'custom', custom_width_in: 48, custom_height_in: 18 });
+
+    const { design } = await customNeonDesignService.confirmDesign(id, anonIdentity);
+
+    // NULL price on the design says "not quoted yet"; the product carries a
+    // 0.00 placeholder only because products.price is NOT NULL, with is_quote
+    // as the flag that stops it reading as free.
+    expect(design.price).toBeNull();
+    expect(design.isQuote).toBe(true);
+    const product = await db('products').where({ id: design.productId }).first();
+    expect(Number(product.price)).toBe(0);
+    expect(Boolean(product.is_quote)).toBe(true);
+  });
+
+  it('describes the typed dimensions in the product description', async () => {
+    const id = await seedDesign({ size: 'custom', custom_width_in: 48, custom_height_in: 18 });
+
+    const { design } = await customNeonDesignService.confirmDesign(id, anonIdentity);
+
+    const product = await db('products').where({ id: design.productId }).first();
+    expect(product.description).toContain('48"x18"');
+  });
+
+  it('exposes one derived dimensions label for both preset and custom sizes', async () => {
+    const preset = await customNeonDesignService.getDesign(await seedDesign({ size: 'large' }), anonIdentity);
+    const custom = await customNeonDesignService.getDesign(
+      await seedDesign({ size: 'custom', custom_width_in: 30.5, custom_height_in: 12 }),
+      anonIdentity
+    );
+
+    expect(preset.dimensions).toBe('36"x36"');
+    expect(preset.isQuote).toBe(false);
+    // Trailing zeros from DECIMAL(6,2) are trimmed: 30.50 reads as 30.5.
+    expect(custom.dimensions).toBe('30.5"x12"');
+    expect(custom.isQuote).toBe(true);
+  });
+
+  it('rejects a custom size with missing or out-of-range dimensions', async () => {
+    const id = await seedDesign({ size: 'medium' });
+
+    await expect(
+      customNeonDesignService.regenerate(id, anonIdentity, { size: 'custom', neonColor: 'pink' })
+    ).rejects.toThrow('Width and height are required');
+
+    await expect(
+      customNeonDesignService.regenerate(id, anonIdentity, {
+        size: 'custom',
+        neonColor: 'pink',
+        customWidthIn: 1,
+        customHeightIn: 20,
+      })
+    ).rejects.toThrow('Width must be between');
+
+    await expect(
+      customNeonDesignService.regenerate(id, anonIdentity, {
+        size: 'custom',
+        neonColor: 'pink',
+        customWidthIn: 20,
+        customHeightIn: 500,
+      })
+    ).rejects.toThrow('Height must be between');
+  });
+
+  it('rejects dimensions on a preset size, which would contradict its fixed label', async () => {
+    const id = await seedDesign({ size: 'medium' });
+
+    await expect(
+      customNeonDesignService.regenerate(id, anonIdentity, {
+        size: 'large',
+        neonColor: 'pink',
+        customWidthIn: 50,
+        customHeightIn: 50,
+      })
+    ).rejects.toThrow('only valid with the custom size');
+  });
+
+  it('clears stored dimensions when switching from a custom size back to a preset', async () => {
+    const id = await seedDesign({ size: 'custom', custom_width_in: 40, custom_height_in: 20 });
+
+    await customNeonDesignService.regenerate(id, anonIdentity, { size: 'large', neonColor: 'pink' });
+
+    const row = await db('custom_neon_designs').where({ id }).first();
+    expect(row.size).toBe('large');
+    // Left behind, these would fail validation on every later confirm.
+    expect(row.custom_width_in).toBeNull();
+    expect(row.custom_height_in).toBeNull();
+  });
+});
+
+// The size, dimensions and colour are frozen onto the order line itself, not
+// left to be recovered from products.description (prose) or the design row —
+// order_items.product_id is ON DELETE SET NULL, so a deleted product would
+// otherwise strip an order of everything but "Custom Neon Design #7".
+describe('customNeonDesign.service — order line snapshot', () => {
+  function choicesOf(row) {
+    return Object.fromEntries(
+      customNeonDesignService.buildNeonSnapshot(row).choices.map((c) => [c.groupKey, c.choiceLabel])
+    );
+  }
+
+  it('captures size, dimensions and colour for a preset design', () => {
+    expect(choicesOf({ size: 'large', neon_color: 'ice-blue' })).toEqual({
+      neon_size: 'Large',
+      neon_dimensions: '36"x36"',
+      // Preset slugs are title-cased for display.
+      neon_color: 'Ice Blue',
+    });
+  });
+
+  it('uses the hex code itself as the label for a customer-picked colour', () => {
+    const choices = choicesOf({ size: 'medium', neon_color: 'custom:#ff2d95' });
+    // The hex is what identifies the colour to whoever fabricates the sign,
+    // so it is the label — not the word "custom".
+    expect(choices.neon_color).toBe('#FF2D95');
+  });
+
+  it('records the typed dimensions for a custom size', () => {
+    expect(choicesOf({ size: 'custom', neon_color: 'pink', custom_width_in: 48, custom_height_in: 18 })).toEqual({
+      neon_size: 'Custom',
+      neon_dimensions: '48"x18"',
+      neon_color: 'Pink',
+    });
+  });
+
+  it('keeps the raw stored token as the machine-readable key', () => {
+    const snapshot = customNeonDesignService.buildNeonSnapshot({
+      size: 'custom',
+      neon_color: 'custom:#ff2d95',
+      custom_width_in: 40,
+      custom_height_in: 40,
+    });
+    const colour = snapshot.choices.find((c) => c.groupKey === 'neon_color');
+    expect(colour.choiceKey).toBe('custom:#ff2d95');
+  });
+
+  it('prices nothing — a neon design is priced by tier or by hand, never by option deltas', () => {
+    const snapshot = customNeonDesignService.buildNeonSnapshot({ size: 'large', neon_color: 'pink' });
+    // A non-zero priceDelta here would be split out as a separate flat-fee
+    // line at checkout and charged twice.
+    expect(snapshot.choices.every((c) => c.priceDelta === 0 && !c.isFlatFee)).toBe(true);
+    expect(snapshot.flatFeeDelta).toBe(0);
+  });
+
+  it('attaches the snapshot to the cart line on confirm', async () => {
+    const id = await seedDesign({ size: 'large', neon_color: 'ice-blue' });
+
+    const { cart } = await customNeonDesignService.confirmDesign(id, anonIdentity);
+
+    const line = cart.items.find((item) => item.name.includes(`#${id}`));
+    expect(line.selectedOptions.choices.map((c) => c.choiceLabel)).toEqual([
+      'Large',
+      '36"x36"',
+      'Ice Blue',
+    ]);
   });
 });

@@ -156,3 +156,39 @@ describe('buildInstruction', () => {
     expect(instruction).not.toContain('dramatically');
   });
 });
+
+// A custom size has no fixed label, so the dimensions reach the model
+// literally — and its aspect ratio is stated explicitly, because without that
+// the model composes everything roughly square whatever the numbers say.
+describe('neonPromptTemplate — custom dimensions', () => {
+  function instructionFor(extra) {
+    return buildInstruction({ designType: 'upload', size: 'custom', neonColor: 'pink', ...extra });
+  }
+
+  it('states the typed dimensions literally', () => {
+    const text = instructionFor({ customWidthIn: 48, customHeightIn: 18 });
+    expect(text).toContain('48 inches wide by 18 inches tall');
+  });
+
+  it('calls out a wide sign as landscape format', () => {
+    expect(instructionFor({ customWidthIn: 60, customHeightIn: 12 })).toContain('landscape-format');
+  });
+
+  it('calls out a tall sign as portrait format', () => {
+    expect(instructionFor({ customWidthIn: 12, customHeightIn: 60 })).toContain('portrait-format');
+  });
+
+  it('calls a near-square sign roughly square', () => {
+    expect(instructionFor({ customWidthIn: 30, customHeightIn: 28 })).toContain('roughly square');
+  });
+
+  it('trims the trailing zeros DECIMAL(6,2) brings back', () => {
+    expect(instructionFor({ customWidthIn: '30.00', customHeightIn: '12.50' })).toContain(
+      '30 inches wide by 12.5 inches tall'
+    );
+  });
+
+  it('falls back to the old wording when dimensions are missing', () => {
+    expect(instructionFor({})).toContain('medium-sized');
+  });
+});

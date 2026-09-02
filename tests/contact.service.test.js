@@ -176,6 +176,10 @@ describe('contact.service.listSubmissions', () => {
     expect(summary).toEqual([
       { topic: 'installer', label: 'Become a Luma Light Installer', total: 1, new: 1 },
       { topic: 'designer', label: 'Speak with a Designer', total: 2, new: 2 },
+      // quote_request is created by the custom-size checkout rather than by a
+      // visitor, but it is still a topic the admin panel filters by, so it
+      // appears in the summary with a zero tally until one arrives.
+      { topic: 'quote_request', label: 'Custom Size Quote Request', total: 0, new: 0 },
     ]);
   });
 

@@ -2,8 +2,11 @@ const orderService = require('../services/order.service');
 const asyncHandler = require('../utils/asyncHandler');
 
 const createOrder = asyncHandler(async (req, res) => {
-  const { shippingAddress } = req.body;
-  const order = await orderService.createOrder(req.user.id, shippingAddress);
+  // `contact` is required only when the cart holds a custom-size item; the
+  // service decides that from the cart and validates accordingly, so this
+  // stays a straight pass-through.
+  const { shippingAddress, contact } = req.body;
+  const order = await orderService.createOrder(req.user.id, shippingAddress, contact);
   res.status(201).json(order);
 });
 
@@ -47,6 +50,14 @@ const patchOrderAdmin = asyncHandler(async (req, res) => {
   res.status(200).json(result);
 });
 
+// Admin: price a pending_quote order's unpriced lines and release it for
+// payment. Separate from patchOrderAdmin because it is the only sanctioned
+// way out of pending_quote (see order.service.js#priceQuote).
+const priceQuoteAdmin = asyncHandler(async (req, res) => {
+  const result = await orderService.priceQuote(Number(req.params.id), req.body.prices, req.user.id);
+  res.status(200).json(result);
+});
+
 const downloadInvoice = asyncHandler(async (req, res) => {
   const orderId = Number(req.params.id);
   const doc = await orderService.generateInvoice(orderId);
@@ -64,5 +75,6 @@ module.exports = {
   listOrdersAdmin,
   getOrderAdmin,
   patchOrderAdmin,
+  priceQuoteAdmin,
   downloadInvoice,
 };

@@ -20,7 +20,10 @@ function belongsToIdentity(row, identity) {
   return false;
 }
 
-async function insertDesign({ userId, sessionId, designType, inputPayload, size, neonColor }, trx = db) {
+async function insertDesign(
+  { userId, sessionId, designType, inputPayload, size, neonColor, customWidthIn, customHeightIn },
+  trx = db
+) {
   const now = new Date();
   const [id] = await trx(TABLE).insert({
     user_id: userId ?? null,
@@ -28,6 +31,9 @@ async function insertDesign({ userId, sessionId, designType, inputPayload, size,
     design_type: designType,
     input_payload: JSON.stringify(inputPayload),
     size,
+    // Null for every preset size — see migration 038.
+    custom_width_in: customWidthIn ?? null,
+    custom_height_in: customHeightIn ?? null,
     neon_color: neonColor,
     status: 'pending',
     attempts: 0,
@@ -131,11 +137,16 @@ async function markFailed(id, error, trx = db) {
 // queue exactly like productSeoModel.enqueue's re-run path. Optionally
 // updates size/neon_color first, so changing either before re-running
 // regenerates the preview with the new values rather than the old ones.
-function requeue(id, { size, neonColor } = {}, trx = db) {
+function requeue(id, { size, neonColor, customWidthIn, customHeightIn } = {}, trx = db) {
   return trx(TABLE)
     .where({ id })
     .update({
       ...(size !== undefined ? { size } : {}),
+      // Written whenever size is being changed (the service always passes
+      // both together), so switching to a preset clears any dimensions the
+      // row was carrying rather than leaving them to fail validation later.
+      ...(customWidthIn !== undefined ? { custom_width_in: customWidthIn } : {}),
+      ...(customHeightIn !== undefined ? { custom_height_in: customHeightIn } : {}),
       ...(neonColor !== undefined ? { neon_color: neonColor } : {}),
       status: 'pending',
       attempts: 0,
@@ -197,7 +208,7 @@ function purgeImages(id, inputPayloadWithoutImages, trx = db) {
 // appears here once an admin promotes it (see setShowcased).
 function listShowcase(limit = 10, trx = db) {
   return trx(TABLE)
-    .select('id', 'design_type', 'size', 'generated_image_url')
+    .select('id', 'design_type', 'size', 'custom_width_in', 'custom_height_in', 'generated_image_url')
     .where({ status: 'ready', is_showcased: true })
     .whereNotNull('generated_image_url')
     .whereNull('images_purged_at')

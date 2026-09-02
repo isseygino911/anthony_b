@@ -24,6 +24,7 @@ async function resetSchema() {
     t.integer('category_id');
     t.string('name');
     t.decimal('price', 10, 2);
+    t.boolean('is_quote').defaultTo(false);
     t.json('pricing_config').nullable();
     t.datetime('deleted_at').nullable();
     t.datetime('created_at');

@@ -24,6 +24,7 @@ const orderService = require('../src/services/order.service');
 
 const TABLES = [
   'contact_submissions',
+  'customer_notifications',
   'notifications',
   'order_audit_log',
   'order_items',
@@ -302,7 +303,7 @@ describe('order.service — cancelOrder (customer self-cancel of an unpaid order
 
     await expect(
       orderService.cancelOrder(order.id, { id: 22, role: 'customer' })
-    ).rejects.toThrow('Only orders awaiting payment can be cancelled');
+    ).rejects.toThrow('Only orders awaiting payment or a quote can be cancelled');
   });
 
   it('rejects cancelling a non-existent order', async () => {

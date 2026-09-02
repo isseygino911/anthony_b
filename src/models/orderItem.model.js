@@ -40,6 +40,13 @@ function deleteByOrderId(orderId, trx) {
   return trx(TABLE).where({ order_id: orderId }).delete();
 }
 
+// Sets the price on a line that was left NULL because it was awaiting a
+// quote (order.service.js#priceQuote). Scoped to item_type 'line' so it can
+// never overwrite an adjustment row's amount.
+function updateUnitPrice(id, unitPrice, trx = db) {
+  return trx(TABLE).where({ id, item_type: 'line' }).update({ unit_price: unitPrice });
+}
+
 async function sumLines(orderId, trx) {
   const row = await trx(TABLE)
     .where({ order_id: orderId, item_type: 'line' })
@@ -87,6 +94,7 @@ module.exports = {
   insertLineItems,
   insertAdjustment,
   listByOrderId,
+  updateUnitPrice,
   deleteByOrderId,
   sumLines,
   sumAdjustments,

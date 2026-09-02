@@ -110,8 +110,32 @@ function describeHex(hex) {
   return base;
 }
 
-function describeSize(size) {
-  return SIZE_LABELS[size] || 'medium-sized';
+// The custom size has no fixed label — the customer typed the dimensions, so
+// they are described literally. Aspect ratio matters more than absolute size
+// to the generated image: a 60x12 sign is a long banner and a 30x30 is a
+// square panel, and without saying so the model composes everything roughly
+// square regardless of the numbers.
+function describeSize(size, customWidthIn, customHeightIn) {
+  if (SIZE_LABELS[size]) return SIZE_LABELS[size];
+  if (customWidthIn == null || customHeightIn == null) return 'medium-sized';
+
+  const width = Number(customWidthIn);
+  const height = Number(customHeightIn);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return 'medium-sized';
+  }
+
+  const literal = `${trimNumber(width)} inches wide by ${trimNumber(height)} inches tall`;
+  const ratio = width / height;
+  if (ratio >= 1.6) return `${literal}, a wide landscape-format sign noticeably wider than it is tall`;
+  if (ratio <= 0.625) return `${literal}, a tall portrait-format sign noticeably taller than it is wide`;
+  return `${literal}, roughly square in proportion`;
+}
+
+// DECIMAL(6,2) arrives as "30.00"; Number() drops the trailing zeros so the
+// prompt reads "30 inches" rather than "30.00 inches".
+function trimNumber(value) {
+  return String(Number(value));
 }
 
 function describeColor(neonColor) {
@@ -123,8 +147,8 @@ function describeColor(neonColor) {
   return neonColor || 'warm amber/gold';
 }
 
-function buildInstruction({ designType, size, neonColor, sketch }) {
-  const sizeText = describeSize(size);
+function buildInstruction({ designType, size, neonColor, sketch, customWidthIn, customHeightIn }) {
+  const sizeText = describeSize(size, customWidthIn, customHeightIn);
   const colorText = describeColor(neonColor);
 
   const shared = `Turn the attached image into a single photorealistic product photo of a real, physically-manufactured LED neon sign, ${sizeText}, using ${colorText} neon tubing. Mount it on a plain indoor wall, photographed straight-on in a dim room so the glow, soft light falloff onto the wall, and a subtle reflection below are visible, matching how real neon sign product photography looks. Render the tubing as continuous glowing tube shapes (rounded line thickness, soft bloom/halo around each tube, slight uneven brightness like real neon) mounted on a thin clear acrylic backing, not as a flat vector illustration or a screen/drawing. Keep the output to exactly one image, no text or borders added outside the sign itself.`;
@@ -154,7 +178,7 @@ function buildInstruction({ designType, size, neonColor, sketch }) {
   return `${shared} The attached image is the reference design/logo/artwork — preserve its recognizable silhouette and proportions as the sign's shape.`;
 }
 
-function buildRequest({ designType, size, neonColor, imageBase64, imageMimeType, sketch }) {
+function buildRequest({ designType, size, neonColor, imageBase64, imageMimeType, sketch, customWidthIn, customHeightIn }) {
   return {
     model: imageModel,
     contents: [
@@ -162,7 +186,7 @@ function buildRequest({ designType, size, neonColor, imageBase64, imageMimeType,
         role: 'user',
         parts: [
           { inlineData: { mimeType: imageMimeType, data: imageBase64 } },
-          { text: buildInstruction({ designType, size, neonColor, sketch }) },
+          { text: buildInstruction({ designType, size, neonColor, sketch, customWidthIn, customHeightIn }) },
         ],
       },
     ],

@@ -11,10 +11,15 @@ async function applySchema(db) {
     t.integer('category_id');
     t.string('name');
     t.decimal('price', 10, 2);
+    t.boolean('is_quote').defaultTo(false);
     t.integer('stock_quantity');
     t.integer('low_stock_threshold').nullable();
     t.json('pricing_config').nullable();
     t.datetime('deleted_at').nullable();
+    // Present in the real schema (007_create_products.js); needed here because
+    // setQuotedPrice touches it.
+    t.datetime('created_at').nullable();
+    t.datetime('updated_at').nullable();
   });
 
   await db.schema.createTable('product_option_groups', (t) => {
@@ -115,6 +120,8 @@ async function applySchema(db) {
     t.string('design_type');
     t.json('input_payload');
     t.string('size').nullable();
+    t.decimal('custom_width_in', 6, 2).nullable();
+    t.decimal('custom_height_in', 6, 2).nullable();
     t.string('neon_color').nullable();
     t.decimal('price', 10, 2).nullable();
     t.string('status').defaultTo('pending');
@@ -126,6 +133,16 @@ async function applySchema(db) {
     t.datetime('images_purged_at').nullable();
     t.datetime('created_at');
     t.datetime('updated_at');
+  });
+
+  await db.schema.createTable('customer_notifications', (t) => {
+    t.increments('id');
+    t.integer('user_id');
+    t.string('type');
+    t.integer('order_id').nullable();
+    t.string('message');
+    t.boolean('is_read').defaultTo(false);
+    t.datetime('created_at');
   });
 
   await db.schema.createTable('contact_submissions', (t) => {

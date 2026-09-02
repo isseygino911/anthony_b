@@ -76,6 +76,9 @@ function listWithProducts(identity, trx = db) {
       'c.unit_price as configured_unit_price',
       'p.name',
       'p.price',
+      // Drives the "Pricing TBD" display and, at checkout, whether the whole
+      // order is held at pending_quote — see order.service.js#createOrder.
+      'p.is_quote',
       trx.raw(
         '(SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as image_url'
       )

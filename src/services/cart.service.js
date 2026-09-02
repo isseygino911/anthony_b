@@ -76,11 +76,17 @@ async function shapeCart(rows) {
       // multiplied by quantity — see order.service.js's matching split into
       // a separate order_items row at checkout.
       const flatFeeTotal = Number(selectedOptions?.flatFeeDelta) || 0;
+      // A custom-size neon design has no price yet (products.is_quote, see
+      // migration 042). Its stored price is 0.00 only because the column is
+      // NOT NULL, so it is reported as null here — the storefront renders
+      // "Pricing TBD" and cannot mistake it for a free item.
+      const isQuote = Boolean(row.is_quote);
       return {
         cartId: row.cart_id,
         productId: row.product_id,
         name: row.name,
-        price,
+        price: isQuote ? null : price,
+        isQuote,
         quantity: row.quantity,
         flatFeeTotal,
         selectedOptions,
@@ -89,8 +95,19 @@ async function shapeCart(rows) {
       };
     }),
   );
-  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity + item.flatFeeTotal, 0);
-  return { items, subtotal: Number(subtotal.toFixed(2)) };
+  // Quote items contribute nothing to the subtotal — their price is unknown,
+  // not zero. hasQuoteItems is what tells the storefront the displayed
+  // subtotal is partial and that checkout will collect contact details
+  // instead of taking payment.
+  const subtotal = items.reduce(
+    (sum, item) => (item.isQuote ? sum : sum + item.price * item.quantity + item.flatFeeTotal),
+    0
+  );
+  return {
+    items,
+    subtotal: Number(subtotal.toFixed(2)),
+    hasQuoteItems: items.some((item) => item.isQuote),
+  };
 }
 
 async function getCart(identityInput) {
@@ -99,7 +116,13 @@ async function getCart(identityInput) {
   return shapeCart(rows);
 }
 
-async function addItem(identityInput, productId, quantity, selections = null) {
+// `snapshot` attaches a selected_options blob to a plain (non-configurable)
+// product's line. Configurable products build theirs from `selections` via
+// pricing.service; a custom neon design has no pricing_config but still has
+// attributes worth freezing onto the order (size, dimensions, colour), so it
+// passes a ready-made snapshot here instead. Ignored for configurable
+// products, which always derive their own.
+async function addItem(identityInput, productId, quantity, selections = null, snapshot = null) {
   const identity = toIdentity(identityInput);
   const product = await productModel.findById(productId);
   if (!product) throw ApiError.notFound('Product not found');
@@ -131,7 +154,7 @@ async function addItem(identityInput, productId, quantity, selections = null) {
     if (existing) {
       await cartModel.updateQuantity(existing.cart_id, existing.quantity + quantity, trx);
     } else {
-      await cartModel.insertRow(identity, productId, quantity, {}, trx);
+      await cartModel.insertRow(identity, productId, quantity, snapshot ? { selectedOptions: snapshot } : {}, trx);
     }
   });
 

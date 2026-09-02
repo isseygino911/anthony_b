@@ -10,6 +10,8 @@ const siteThemeModel = require('../models/siteTheme.model');
 const notificationService = require('./notification.service');
 const { getStripeClient } = require('../config/stripe');
 const ApiError = require('../utils/apiError');
+const contactService = require('./contact.service');
+const customerNotificationModel = require('../models/customerNotification.model');
 
 const ADJUSTMENT_LABELS = {
   discount: 'Manual discount',
@@ -69,14 +71,45 @@ async function shapeOrder(orderId, trx = db) {
   };
 }
 
+// Appends a snapshot's descriptive attributes to the product name, e.g.
+// 'Custom Neon Design #7 — 36"x36", Ice Blue'. Only zero-priced, non-fee
+// choices are used: priced options are already itemised as their own lines
+// or folded into unit_price, so repeating them here would read as if they
+// were being charged twice. Products without a snapshot are unaffected.
+function buildLineLabel(name, selectedOptions) {
+  const descriptive = (selectedOptions?.choices || [])
+    .filter((choice) => !choice.isFlatFee && !choice.priceDelta)
+    .filter((choice) => choice.groupKey !== 'neon_size') // implied by the dimensions
+    .map((choice) => choice.choiceLabel)
+    .filter((label) => label && label !== '—');
+  return descriptive.length ? `${name} — ${descriptive.join(', ')}` : name;
+}
+
 // architecture.md §2/§7 — POST /api/orders: snapshot cart -> order_items,
 // decrement stock, notify on low-stock crossing, all in one transaction.
-async function createOrder(userId, shippingAddress) {
+async function createOrder(userId, shippingAddress, contact = null) {
   const cartRows = await cartModel.listWithProducts({ userId });
   if (!cartRows.length) throw ApiError.badRequest('Cart is empty');
 
+  // An unpriced custom-size line (products.is_quote, migration 042) makes the
+  // whole order a quote request: there is no total to charge, so it is held
+  // at 'pending_quote' and Stripe is never involved until an admin prices it.
+  // Whole-order rather than per-line because an order has exactly one status
+  // and one payment — splitting a mixed cart into a paid order plus a quoted
+  // one would silently create two orders from one checkout.
+  const isQuote = cartRows.some((row) => row.is_quote);
+
+  // Contact details are what the business follows the quote up on, so they
+  // are required before the order is created rather than chased afterwards.
+  // Validated here (outside the transaction) so a bad payload never leaves a
+  // half-written order behind.
+  const contactDetails = isQuote ? contactService.assertQuoteContact(contact) : null;
+
   const orderId = await db.transaction(async (trx) => {
-    const id = await orderModel.insertOrder({ userId, shippingAddress }, trx);
+    const id = await orderModel.insertOrder(
+      { userId, shippingAddress, status: isQuote ? 'pending_quote' : 'pending_payment' },
+      trx
+    );
 
     // Freeze the tax rate active right now onto the order — recomputeAndStoreTotals
     // reads it back off the order row rather than site_theme, so later rate
@@ -97,10 +130,21 @@ async function createOrder(userId, shippingAddress) {
           ? JSON.parse(row.selected_options)
           : row.selected_options
         : null;
-      const unitPrice = row.configured_unit_price != null ? Number(row.configured_unit_price) : Number(row.price);
+      // unit_price is NULLABLE (010) and SUM() skips NULLs, so a quote line
+      // contributes nothing to the subtotal rather than contributing its
+      // placeholder 0.00 — the total stays honest until the admin prices it.
+      const unitPrice = row.is_quote
+        ? null
+        : row.configured_unit_price != null
+          ? Number(row.configured_unit_price)
+          : Number(row.price);
       lines.push({
         productId: row.product_id,
-        label: row.name,
+        // The label absorbs the snapshot's descriptive choices (a neon
+        // design's dimensions and colour) so the line still says what was
+        // bought in plain text — invoices and the order list render `label`
+        // alone, and product_id is ON DELETE SET NULL.
+        label: buildLineLabel(row.name, selectedOptions),
         unitPrice,
         quantity: row.quantity,
         selectedOptions,
@@ -137,6 +181,25 @@ async function createOrder(userId, shippingAddress) {
 
     await cartModel.deleteAllForIdentity({ userId }, trx);
 
+    // Everything the quote needs to be actioned is written in the same
+    // transaction as the order itself: the enquiry the admin works from, the
+    // admin's alert, and the customer's own confirmation. An order sitting
+    // unpriced that nobody was told about is the exact failure this feature
+    // exists to prevent, so none of the four is allowed to land without the
+    // others.
+    if (isQuote) {
+      await contactService.createQuoteRequest({ userId, orderId: id, contact: contactDetails }, trx);
+      await customerNotificationModel.insert(
+        {
+          userId,
+          type: 'quote_requested',
+          orderId: id,
+          message: `Thanks — we've received your custom-size order #${id}. Our team will review the dimensions and send you a quote shortly.`,
+        },
+        trx
+      );
+    }
+
     return id;
   });
 
@@ -162,8 +225,11 @@ async function cancelOrder(orderId, requester) {
   if (order.user_id !== requester.id && requester.role !== 'admin') {
     throw ApiError.notFound('Order not found');
   }
-  if (order.status !== 'pending_payment') {
-    throw ApiError.badRequest('Only orders awaiting payment can be cancelled');
+  // A quote the customer no longer wants is cancellable on the same terms as
+  // an unpaid order: no money has changed hands in either case, and the
+  // alternative is an unpriced order they cannot pay for and cannot remove.
+  if (order.status !== 'pending_payment' && order.status !== 'pending_quote') {
+    throw ApiError.badRequest('Only orders awaiting payment or a quote can be cancelled');
   }
 
   if (order.stripe_payment_intent_id) {
@@ -298,6 +364,17 @@ async function applyAdjustment(orderId, { type, amount, newStatus, reason }, act
       if (newStatus === 'refunded') {
         throw ApiError.badRequest('Use the refund adjustment to refund an order — this issues the actual Stripe refund, not just a status label');
       }
+      // A quote order has NULL line prices and a 0.00 total until it is
+      // priced. Letting a plain status change walk it into pending_payment
+      // would expose a $0 payable order to the customer, so the only way out
+      // of pending_quote (short of cancelling it) is priceQuote below, which
+      // writes the prices and the status together.
+      if (order.status === 'pending_quote' && newStatus !== 'cancelled') {
+        throw ApiError.badRequest('Set prices for this quote before changing its status');
+      }
+      if (newStatus === 'pending_quote') {
+        throw ApiError.badRequest('An order cannot be moved back to awaiting quote');
+      }
       const oldValue = order.status;
       await orderModel.updateStatus(orderId, newStatus, trx);
       await orderAuditLogModel.insertEntry(
@@ -336,6 +413,78 @@ async function applyAdjustment(orderId, { type, amount, newStatus, reason }, act
     const auditLogEntry = (await orderAuditLogModel.listByOrderId(orderId, trx)).at(-1);
     const shaped = await shapeOrder(orderId, trx);
     return { order: shaped, auditLogEntry };
+  });
+}
+
+// Admin-only: puts prices on a quote order's unpriced lines and releases it
+// for payment. The single exit from 'pending_quote' (migration 039) —
+// applyAdjustment refuses that transition precisely so this stays the only
+// path, and prices and status therefore always change together.
+//
+// `prices` is a map of order_item id -> unit price. Every unpriced line must
+// appear in it: a partially-priced order would hand the customer a total
+// that silently omits an item they are going to be sent.
+async function priceQuote(orderId, prices, actorUserId) {
+  const order = await orderModel.findById(orderId);
+  if (!order) throw ApiError.notFound('Order not found');
+  if (order.status !== 'pending_quote') throw ApiError.badRequest('This order is not awaiting a quote');
+
+  const items = await orderItemModel.listByOrderId(orderId);
+  const unpriced = items.filter((item) => item.item_type === 'line' && item.unit_price === null);
+  if (!unpriced.length) throw ApiError.badRequest('This order has no unpriced items');
+
+  // Validate every price before writing any of them, so a bad value in the
+  // middle of the map cannot leave the order half-priced.
+  const resolved = unpriced.map((item) => {
+    const raw = prices?.[item.id] ?? prices?.[String(item.id)];
+    const price = Number(raw);
+    if (raw === undefined || raw === null || raw === '' || !Number.isFinite(price)) {
+      throw ApiError.badRequest(`A price is required for item ${item.id}`);
+    }
+    if (price <= 0) throw ApiError.badRequest(`Price for item ${item.id} must be greater than zero`);
+    return { id: item.id, productId: item.product_id, price: Math.round(price * 100) / 100 };
+  });
+
+  return db.transaction(async (trx) => {
+    // eslint-disable-next-line no-restricted-syntax
+    for (const line of resolved) {
+      // eslint-disable-next-line no-await-in-loop
+      await orderItemModel.updateUnitPrice(line.id, line.price, trx);
+      // The product carries the same placeholder price and is_quote flag
+      // (migration 042); clearing both keeps a re-order of this design from
+      // starting another quote cycle at 0.00.
+      // eslint-disable-next-line no-await-in-loop
+      await productModel.setQuotedPrice(line.productId, line.price, trx);
+    }
+
+    const totals = await recomputeAndStoreTotals(orderId, trx);
+    await orderModel.updateStatus(orderId, 'pending_payment', trx);
+    await orderAuditLogModel.insertEntry(
+      {
+        orderId,
+        actorUserId,
+        fieldChanged: 'status',
+        oldValue: 'pending_quote',
+        newValue: 'pending_payment',
+        reason: `Quote priced — total ${formatMoney(totals.total)}`,
+      },
+      trx
+    );
+
+    // The customer is told in the same transaction that prices it: a priced
+    // order they were never told about would sit unpaid indefinitely.
+    await customerNotificationModel.insert(
+      {
+        userId: order.user_id,
+        type: 'quote_priced',
+        orderId,
+        message: `Your quote for order #${orderId} is ready — ${formatMoney(totals.total)}. You can now complete your payment.`,
+      },
+      trx
+    );
+
+    const auditLogEntry = (await orderAuditLogModel.listByOrderId(orderId, trx)).at(-1);
+    return { order: await shapeOrder(orderId, trx), auditLogEntry };
   });
 }
 
@@ -464,5 +613,6 @@ module.exports = {
   listOrdersAdmin,
   getOrderAdmin,
   applyAdjustment,
+  priceQuote,
   generateInvoice,
 };

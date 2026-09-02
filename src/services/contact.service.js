@@ -11,7 +11,15 @@ const ApiError = require('../utils/apiError');
 const TOPICS = {
   installer: 'Become a Luma Light Installer',
   designer: 'Speak with a Designer',
+  quote_request: 'Custom Size Quote Request',
 };
+
+// quote_request rows are created by the checkout flow rather than by a
+// visitor filling in a contact page, so they are not offered as a public
+// contact surface — submit() rejects them and order.service.js calls
+// createQuoteRequest() below instead. The admin panel still lists and works
+// them exactly like the other topics.
+const INTERNAL_TOPICS = new Set(['quote_request']);
 
 const STATUSES = ['new', 'in_progress', 'closed'];
 
@@ -50,7 +58,7 @@ function optionalText(value, field, max) {
 // keeping the column permissive means an older row, or one written by some
 // future path that genuinely has no phone number, is still representable.
 async function submit(topic, payload, user) {
-  if (!TOPICS[topic]) {
+  if (!TOPICS[topic] || INTERNAL_TOPICS.has(topic)) {
     throw ApiError.badRequest('Unknown contact topic', { topic });
   }
 
@@ -83,6 +91,63 @@ async function submit(topic, payload, user) {
 
     return submission;
   });
+}
+
+// Validates the contact block that must accompany a custom-size checkout.
+// Deliberately the same field rules as submit() above (shared helpers, same
+// limits, same required phone) so a quote enquiry reaching the admin looks
+// exactly like one from any other contact surface. Called before the order
+// transaction opens, so a bad payload 400s without writing anything.
+function assertQuoteContact(contact) {
+  if (!contact || typeof contact !== 'object') {
+    throw ApiError.badRequest('Contact details are required for a custom-size quote');
+  }
+  const name = requireText(contact.name, 'Name', LIMITS.name);
+  const email = requireText(contact.email, 'Email', LIMITS.email).toLowerCase();
+  if (!EMAIL_RE.test(email)) {
+    throw ApiError.badRequest('A valid email address is required');
+  }
+  const phone = requireText(contact.phone, 'Phone', LIMITS.phone);
+  // The message is the only optional field: the design and its dimensions
+  // already say what is being asked for, so anything here is extra context
+  // rather than the substance of the enquiry.
+  const message = optionalText(contact.message, 'Message', LIMITS.message);
+  return { name, email, phone, message };
+}
+
+// Writes the enquiry + the admin alert for a custom-size order. Takes the
+// caller's transaction rather than opening its own: order.service.js needs
+// the order, the enquiry and both notifications to land together.
+async function createQuoteRequest({ userId, orderId, contact }, trx) {
+  const submission = await contactSubmissionModel.insert(
+    {
+      topic: 'quote_request',
+      userId,
+      name: contact.name,
+      email: contact.email,
+      phone: contact.phone,
+      company: null,
+      // The order number is what the admin needs to act on this, so it is
+      // part of the message body rather than only a column — the admin
+      // Contact list shows the message without having to join to orders.
+      message: contact.message
+        ? `Custom-size quote requested for order #${orderId}.
+
+${contact.message}`
+        : `Custom-size quote requested for order #${orderId}.`,
+    },
+    trx
+  );
+
+  await notificationModel.insertNotification(
+    {
+      type: 'quote_requested',
+      message: `Order #${orderId} needs a quote — custom-size design from ${contact.name}.`,
+    },
+    trx
+  );
+
+  return submission;
 }
 
 async function listSubmissions({ topic, status, page = 1, pageSize = 25 } = {}) {
@@ -148,4 +213,13 @@ async function updateSubmission(id, { status, adminNotes }) {
   return contactSubmissionModel.update(id, fields);
 }
 
-module.exports = { submit, listSubmissions, getSubmission, updateSubmission, TOPICS, STATUSES };
+module.exports = {
+  submit,
+  assertQuoteContact,
+  createQuoteRequest,
+  listSubmissions,
+  getSubmission,
+  updateSubmission,
+  TOPICS,
+  STATUSES,
+};

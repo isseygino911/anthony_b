@@ -22,6 +22,12 @@ async function createOrReusePaymentIntent(orderId, requester) {
   if (order.user_id !== requester.id && requester.role !== 'admin') {
     throw ApiError.notFound('Order not found');
   }
+  if (order.status === 'pending_quote') {
+    // Its total is 0.00 and its line prices are NULL until an admin runs
+    // priceQuote (migration 039) — creating an intent now would charge
+    // nothing for a sign the business still has to build.
+    throw ApiError.badRequest('This order is awaiting a quote — we will email you once it is priced');
+  }
   if (order.status !== 'pending_payment') {
     throw ApiError.badRequest('Order is not awaiting payment');
   }

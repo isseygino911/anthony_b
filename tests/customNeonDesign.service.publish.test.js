@@ -58,6 +58,7 @@ async function resetSchema() {
     t.string('name');
     t.text('description');
     t.decimal('price', 10, 2);
+    t.boolean('is_quote').defaultTo(false);
     t.string('sku');
     t.json('tags').nullable();
     t.integer('stock_quantity').defaultTo(0);
@@ -101,6 +102,8 @@ async function resetSchema() {
     t.string('design_type');
     t.json('input_payload');
     t.string('size').nullable();
+    t.decimal('custom_width_in', 6, 2).nullable();
+    t.decimal('custom_height_in', 6, 2).nullable();
     t.string('neon_color').nullable();
     t.decimal('price', 10, 2).nullable();
     t.string('status').defaultTo('pending');

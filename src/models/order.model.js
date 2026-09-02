@@ -7,7 +7,9 @@ async function insertOrder(data, trx) {
   const now = new Date();
   const [id] = await trx(TABLE).insert({
     user_id: data.userId,
-    status: 'pending_payment',
+    // Defaults to the normal pay-now flow; createOrder passes 'pending_quote'
+    // when the cart contains an unpriced custom-size item (migration 039).
+    status: data.status ?? 'pending_payment',
     shipping_address: JSON.stringify(data.shippingAddress),
     subtotal: 0,
     adjustment_total: 0,

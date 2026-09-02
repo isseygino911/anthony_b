@@ -28,6 +28,10 @@ const createDesign = asyncHandler(async (req, res) => {
     fontFamily: req.body.font_family,
     size: req.body.size,
     neonColor: req.body.neon_color,
+    // Multipart form fields arrive as strings; the service parses and
+    // range-checks them (parseDimension) rather than trusting them here.
+    customWidthIn: req.body.custom_width_in,
+    customHeightIn: req.body.custom_height_in,
   });
   res.status(201).json(design);
 });
@@ -43,10 +47,12 @@ const getActiveDesign = asyncHandler(async (req, res) => {
 });
 
 const regenerateDesign = asyncHandler(async (req, res) => {
-  const { size, neon_color: neonColor } = req.body;
+  const { size, neon_color: neonColor, custom_width_in: customWidthIn, custom_height_in: customHeightIn } = req.body;
   const design = await customNeonDesignService.regenerate(Number(req.params.id), identityFromReq(req), {
     size,
     neonColor,
+    customWidthIn,
+    customHeightIn,
   });
   res.status(200).json(design);
 });

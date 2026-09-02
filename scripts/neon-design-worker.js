@@ -81,6 +81,8 @@ async function processRow(row) {
   const request = neonPromptTemplateService.buildRequest({
     designType: row.design_type,
     size: row.size,
+    customWidthIn: row.custom_width_in,
+    customHeightIn: row.custom_height_in,
     neonColor: row.neon_color,
     imageBase64,
     imageMimeType: mimetype,

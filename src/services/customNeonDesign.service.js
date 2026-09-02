@@ -15,8 +15,60 @@ const { isConfigured: geminiIsConfigured } = require('../config/gemini');
 const CUSTOM_NEON_CATEGORY_SLUG = 'custom-neon-signs';
 
 // Not admin-configurable today — revisit if pricing needs to change per-design.
+// 'custom' is deliberately absent: a customer-specified size has no price the
+// business can compute up front, and its absence from this map is what every
+// "is this quotable?" check keys on (isQuoteSize below). Adding a price here
+// would silently turn custom-size designs back into instant-checkout ones.
 const SIZE_PRICES = { small: 249.99, medium: 399.99, large: 524.99 };
 const SIZE_DIMENSIONS = { small: '12"x12"', medium: '24"x24"', large: '36"x36"' };
+
+// The fourth option: the customer types their own width/height and the design
+// is priced by hand afterwards. See migrations 038 (columns) and 039 (the
+// pending_quote order state this eventually produces).
+const CUSTOM_SIZE = 'custom';
+const SIZES = [...Object.keys(SIZE_PRICES), CUSTOM_SIZE];
+
+// Bounds on the typed dimensions. The lower bound rejects nonsense (0, a
+// stray decimal) and the upper one keeps a request inside what can actually
+// be fabricated and shipped, so an admin never has to reply "we cannot build
+// a 900-inch sign". Inches, matching SIZE_DIMENSIONS above.
+const MIN_CUSTOM_IN = 4;
+const MAX_CUSTOM_IN = 120;
+
+function isQuoteSize(size) {
+  return size === CUSTOM_SIZE;
+}
+
+// Parses one typed dimension. Rejects NaN/Infinity/negatives up front, then
+// rounds to 2dp to match the DECIMAL(6,2) column so the value read back from
+// the database is identical to the one validated here — otherwise a design
+// could pass validation and come back subtly different in the AI prompt and
+// the customer-facing label.
+function parseDimension(value, field) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) throw ApiError.badRequest(`${field} must be a number`);
+  const rounded = Math.round(num * 100) / 100;
+  if (rounded < MIN_CUSTOM_IN || rounded > MAX_CUSTOM_IN) {
+    throw ApiError.badRequest(`${field} must be between ${MIN_CUSTOM_IN} and ${MAX_CUSTOM_IN} inches`);
+  }
+  return rounded;
+}
+
+// Formats stored dimensions the same way SIZE_DIMENSIONS formats presets, so
+// everything downstream (product description, showcase label, admin views)
+// renders one consistent '<w>"x<h>"' string regardless of which path the
+// design came from. DECIMAL(6,2) comes back from MySQL as "30.00", so the
+// trailing zeros are dropped to read as 30" rather than 30.00".
+function formatInches(value) {
+  return String(Number(value));
+}
+
+function describeDimensions(row) {
+  if (!isQuoteSize(row.size)) return SIZE_DIMENSIONS[row.size] ?? null;
+  if (row.custom_width_in == null || row.custom_height_in == null) return null;
+  return `${formatInches(row.custom_width_in)}"x${formatInches(row.custom_height_in)}"`;
+}
+
 // Preset whitelist for the neon_color column (varchar(32), not an enum — no
 // migration needed to extend this). Every value must also have a COLOR_LABELS
 // entry in neonPromptTemplate.service.js: that label is what actually reaches
@@ -71,9 +123,111 @@ function describeColorForCustomer(neonColor) {
   return match ? `custom ${match[1].toUpperCase()}` : neonColor;
 }
 
-function assertSizeAndColor(size, neonColor) {
-  if (!SIZE_PRICES[size]) throw ApiError.badRequest('Invalid size');
+// Validates the size/colour pair and, for the custom size, the typed
+// dimensions alongside them. Returns the parsed dimensions so callers store
+// exactly what was validated rather than re-reading the raw request values:
+// {customWidthIn, customHeightIn}, both null for a preset size.
+//
+// Presets must NOT carry dimensions — a row with size 'large' and a stray
+// 50x50 on it would render one thing in the product description
+// (SIZE_DIMENSIONS) and another in the admin view, so the two are rejected
+// together rather than silently ignored.
+// The colour as it should read on an order line. Differs from
+// describeColorForCustomer above, which is prose for a product description
+// ("custom #FF2D95"): here a customer-picked colour is the bare hex, because
+// that is the value that identifies the colour to whoever fabricates the
+// sign. Presets keep their slug title-cased ('ice-blue' -> 'Ice Blue').
+function labelNeonColor(neonColor) {
+  const hex = /^custom:(#[0-9a-f]{6})$/.exec(String(neonColor ?? ''));
+  if (hex) return hex[1].toUpperCase();
+  return String(neonColor ?? '')
+    .split('-')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+// The size/dimensions/colour snapshot attached to a neon line at checkout.
+//
+// Shaped as a `choices` array rather than a bespoke object so it reuses the
+// snapshot format configurable products already produce
+// (pricing.service.js#computePrice) — the cart drawer, the order pages and
+// the admin order view all iterate `choices` and therefore render these with
+// no UI changes at all. priceDelta is 0 throughout: a neon design is priced
+// by its tier (SIZE_PRICES) or by hand, never by per-option deltas, and a
+// non-zero value here would be double-counted as a flat fee at checkout.
+//
+// Written onto the order line so the order stays readable on its own terms:
+// products.description carries the same facts as prose today, but the line's
+// FK is ON DELETE SET NULL, so deleting the product would otherwise leave an
+// order line that says only "Custom Neon Design #7".
+function buildNeonSnapshot(row) {
+  const choices = [
+    {
+      groupKey: 'neon_size',
+      groupLabel: 'Size',
+      choiceKey: row.size,
+      // 'custom' on its own tells a reader nothing, so it reads as the
+      // dimensions the customer actually asked for.
+      choiceLabel: isQuoteSize(row.size) ? 'Custom' : capitalize(row.size),
+      priceDelta: 0,
+      isFlatFee: false,
+    },
+    {
+      groupKey: 'neon_dimensions',
+      groupLabel: 'Dimensions',
+      choiceKey: describeDimensions(row) ?? '',
+      choiceLabel: describeDimensions(row) ?? '—',
+      priceDelta: 0,
+      isFlatFee: false,
+    },
+    {
+      groupKey: 'neon_color',
+      groupLabel: 'Colour',
+      // The raw stored token ('custom:#ff2d95' / 'ice-blue') is kept as the
+      // machine-readable key; choiceLabel is what a person reads.
+      choiceKey: row.neon_color,
+      choiceLabel: labelNeonColor(row.neon_color),
+      priceDelta: 0,
+      isFlatFee: false,
+    },
+  ];
+
+  return {
+    // sizeInches is the configurable-product notion of a single linear size
+    // and does not apply to a two-dimensional neon sign; the dimensions live
+    // in the choices above. Kept null so the shape stays uniform.
+    sizeInches: null,
+    totalWatts: 0,
+    choices,
+    flatFeeDelta: 0,
+  };
+}
+
+function capitalize(value) {
+  const text = String(value ?? '');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function assertSizeAndColor(size, neonColor, dimensions = {}) {
+  if (!SIZES.includes(size)) throw ApiError.badRequest('Invalid size');
   if (!isValidNeonColor(neonColor)) throw ApiError.badRequest('Invalid neon_color');
+
+  const { customWidthIn, customHeightIn } = dimensions;
+  if (!isQuoteSize(size)) {
+    if (customWidthIn != null || customHeightIn != null) {
+      throw ApiError.badRequest('Custom dimensions are only valid with the custom size');
+    }
+    return { customWidthIn: null, customHeightIn: null };
+  }
+
+  if (customWidthIn == null || customHeightIn == null) {
+    throw ApiError.badRequest('Width and height are required for a custom size');
+  }
+  return {
+    customWidthIn: parseDimension(customWidthIn, 'Width'),
+    customHeightIn: parseDimension(customHeightIn, 'Height'),
+  };
 }
 
 function toModelIdentity(identity) {
@@ -110,6 +264,15 @@ async function shapeDesign(row) {
     designType: row.design_type,
     inputPayload: await shapeInputPayload(inputPayload),
     size: row.size,
+    customWidthIn: row.custom_width_in !== null ? Number(row.custom_width_in) : null,
+    customHeightIn: row.custom_height_in !== null ? Number(row.custom_height_in) : null,
+    // One derived label so no caller has to know whether this design used a
+    // preset or typed dimensions.
+    dimensions: describeDimensions(row),
+    // Tells the storefront to show "Pricing TBD" instead of a figure, and to
+    // collect contact details before checkout. Derived rather than stored so
+    // it can never disagree with `size`.
+    isQuote: isQuoteSize(row.size),
     neonColor: row.neon_color,
     price: row.price !== null ? Number(row.price) : null,
     status: row.status,
@@ -127,14 +290,17 @@ async function shapeDesign(row) {
 
 const ACTIVE_GENERATION_ERROR = 'You already have a design generating — please wait for it to finish';
 
-async function createDesign(identity, { designType, file, strokes, text, fontFamily, size, neonColor }) {
+async function createDesign(
+  identity,
+  { designType, file, strokes, text, fontFamily, size, neonColor, customWidthIn, customHeightIn }
+) {
   assertIdentity(identity);
   if (!file) throw ApiError.badRequest('No design image uploaded');
   if (!['upload', 'draw', 'text'].includes(designType)) throw ApiError.badRequest('Invalid design_type');
   // Canonicalise before validating so the stored form is the one the
   // storefront's stale-preview comparison expects (see normalizeNeonColor).
   neonColor = normalizeNeonColor(neonColor);
-  assertSizeAndColor(size, neonColor);
+  const dimensions = assertSizeAndColor(size, neonColor, { customWidthIn, customHeightIn });
 
   const active = await findActive(identity);
   if (active) throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
@@ -159,6 +325,7 @@ async function createDesign(identity, { designType, file, strokes, text, fontFam
     inputPayload,
     size,
     neonColor,
+    ...dimensions,
   });
   return shapeDesign(row);
 }
@@ -190,16 +357,23 @@ async function getActiveDesign(identity) {
 // Optionally updates size/neonColor before re-queuing, so changing either in
 // the UI and hitting "Re-run AI preview" regenerates with the new values
 // rather than silently keeping the ones from the first generation.
-async function regenerate(id, identity, { size, neonColor } = {}) {
+async function regenerate(id, identity, { size, neonColor, customWidthIn, customHeightIn } = {}) {
   const row = await getOwnedDesign(id, identity);
   neonColor = normalizeNeonColor(neonColor);
-  if (size !== undefined || neonColor !== undefined) assertSizeAndColor(size, neonColor);
+  let dimensions;
+  if (size !== undefined || neonColor !== undefined) {
+    dimensions = assertSizeAndColor(size, neonColor, { customWidthIn, customHeightIn });
+  }
 
   const active = await findActive(identity);
   if (active && active.id !== row.id) throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
   if (row.status === 'pending' || row.status === 'processing') throw ApiError.badRequest(ACTIVE_GENERATION_ERROR);
 
-  await customNeonDesignModel.requeue(id, { size, neonColor });
+  // Switching a design away from the custom size has to clear the old
+  // dimensions, not just leave them behind — assertSizeAndColor rejects a
+  // preset that still carries them, so a stale pair would make every
+  // subsequent regenerate/confirm on this row fail validation.
+  await customNeonDesignModel.requeue(id, { size, neonColor, ...(dimensions ?? {}) });
   return shapeDesign(await customNeonDesignModel.findById(id));
 }
 
@@ -218,13 +392,24 @@ async function confirmDesign(id, identity) {
   if (row.status !== 'ready') throw ApiError.badRequest('Design preview is not ready yet');
 
   if (row.product_id) {
-    const cart = await cartService.addItem(identity, row.product_id, 1);
+    // Re-order path ("Order again"): rebuild the snapshot from the design so
+    // the repeat line carries the same size/dimensions/colour as the first.
+    const cart = await cartService.addItem(identity, row.product_id, 1, null, buildNeonSnapshot(row));
     return { design: await shapeDesign(row), cart };
   }
 
-  assertSizeAndColor(row.size, row.neon_color);
+  assertSizeAndColor(row.size, row.neon_color, {
+    customWidthIn: row.custom_width_in,
+    customHeightIn: row.custom_height_in,
+  });
 
-  const price = SIZE_PRICES[row.size];
+  // A custom-size design has no price yet. The product is still created (the
+  // cart and order flows work in terms of products, and the customer has
+  // finished designing), but at 0.00 with is_quote set — order.service.js
+  // reads that flag to hold the resulting order at pending_quote instead of
+  // charging 0. The real figure is written by the admin at pricing time.
+  const quote = isQuoteSize(row.size);
+  const price = quote ? 0 : SIZE_PRICES[row.size];
   const category = await categoryModel.findBySlug(CUSTOM_NEON_CATEGORY_SLUG);
   if (!category) throw ApiError.internal('Custom neon category is not configured');
 
@@ -236,24 +421,29 @@ async function confirmDesign(id, identity) {
         // describeColorForCustomer keeps the raw "custom:#rrggbb" token out of
         // customer-visible order text. anthony_f/src/pages/admin/ProductForm.tsx
         // rebuilds this same string client-side — keep the two in step.
-        description: `Custom AI-generated neon sign design (${SIZE_DIMENSIONS[row.size]}, ${describeColorForCustomer(row.neon_color)}).`,
+        description: `Custom AI-generated neon sign design (${describeDimensions(row)}, ${describeColorForCustomer(row.neon_color)}).`,
         price,
         sku: `NEON-${row.id}`,
         stock_quantity: 9999,
       },
       trx
     );
+    if (quote) await trx('products').where({ id: product.id }).update({ is_quote: true });
     await trx('products').where({ id: product.id }).update({ is_active: false });
     await productImageModel.insertImages(
       [{ product_id: product.id, url: row.generated_image_url, is_primary: true, sort_order: 0 }],
       trx
     );
-    await customNeonDesignModel.confirm({ id: row.id, price, productId: product.id }, trx);
+    // price stays NULL on a quote design — the column is nullable precisely
+    // so "not priced yet" is representable rather than being faked as 0.
+    await customNeonDesignModel.confirm({ id: row.id, price: quote ? null : price, productId: product.id }, trx);
     return product.id;
   });
 
-  // Reuses the existing, unmodified cart flow — same as adding any other product.
-  const cart = await cartService.addItem(identity, productId, 1);
+  // Reuses the existing cart flow — same as adding any other product, plus the
+  // size/dimensions/colour snapshot that makes the resulting order line
+  // readable without joining back to the product or the design.
+  const cart = await cartService.addItem(identity, productId, 1, null, buildNeonSnapshot(row));
   return { design: await shapeDesign(await customNeonDesignModel.findById(id)), cart };
 }
 
@@ -387,7 +577,7 @@ async function listShowcase(limit) {
     rows.map(async (row) => ({
       id: row.id,
       label: SHOWCASE_LABELS[row.design_type] ?? 'Custom design',
-      dimensions: row.size ? SIZE_DIMENSIONS[row.size] : null,
+      dimensions: describeDimensions(row),
       imageUrl: await signImageUrl(row.generated_image_url),
     })),
   );
@@ -474,10 +664,18 @@ async function getUsageByUser({ page, pageSize }) {
 module.exports = {
   SIZE_PRICES,
   SIZE_DIMENSIONS,
+  SIZES,
+  CUSTOM_SIZE,
+  MIN_CUSTOM_IN,
+  MAX_CUSTOM_IN,
+  isQuoteSize,
+  describeDimensions,
   CUSTOM_COLOR_RE,
   isValidNeonColor,
   normalizeNeonColor,
   describeColorForCustomer,
+  labelNeonColor,
+  buildNeonSnapshot,
   createDesign,
   getDesign,
   getActiveDesign,

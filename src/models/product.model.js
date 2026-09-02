@@ -137,6 +137,14 @@ function softDeleteMany(ids, trx = db) {
   return trx(TABLE).whereIn('id', ids).update({ deleted_at: new Date() });
 }
 
+// Clears the "awaiting quote" state on a custom-size design's product once
+// an admin has priced it (order.service.js#priceQuote): writes the real
+// price and drops the is_quote flag together, so the placeholder 0.00 and
+// the flag can never disagree.
+function setQuotedPrice(id, price, trx = db) {
+  return trx(TABLE).where({ id }).update({ price, is_quote: false, updated_at: new Date() });
+}
+
 function decrementStock(id, quantity, trx) {
   return trx(TABLE).where({ id }).decrement('stock_quantity', quantity);
 }
@@ -158,6 +166,7 @@ module.exports = {
   softDeleteProduct,
   softDeleteMany,
   setActive,
+  setQuotedPrice,
   decrementStock,
   incrementStock,
 };
