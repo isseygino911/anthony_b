@@ -11,6 +11,13 @@ function findByProductId(productId, trx = db) {
   return trx(TABLE).where({ product_id: productId }).first();
 }
 
+// Batch form of findByProductId, for resolving every neon line on an order in
+// one query rather than one per line.
+function findByProductIds(productIds, trx = db) {
+  if (!productIds.length) return Promise.resolve([]);
+  return trx(TABLE).whereIn('product_id', productIds);
+}
+
 // Owner check: a design belongs to the caller if either its user_id matches
 // the logged-in user, or its session_id matches the anon session cookie —
 // same "exactly one of the two" identity convention as carts.
@@ -261,6 +268,7 @@ module.exports = {
   MAX_ATTEMPTS,
   findById,
   findByProductId,
+  findByProductIds,
   belongsToIdentity,
   insertDesign,
   listPending,

@@ -135,6 +135,15 @@ async function applySchema(db) {
     t.datetime('updated_at');
   });
 
+  // Needed by the PDF generators, which look the customer up for the
+  // ship-to block (order.service.js#generateInvoice / #generateSpecSheet).
+  await db.schema.createTable('users', (t) => {
+    t.increments('id');
+    t.string('email');
+    t.string('name');
+    t.string('role').defaultTo('customer');
+  });
+
   await db.schema.createTable('customer_notifications', (t) => {
     t.increments('id');
     t.integer('user_id');

@@ -9,5 +9,6 @@ router.get('/admin/orders/:id', requireAuth, requireAdmin, ordersController.getO
 router.patch('/admin/orders/:id', requireAuth, requireAdmin, ordersController.patchOrderAdmin);
 router.post('/admin/orders/:id/price-quote', requireAuth, requireAdmin, ordersController.priceQuoteAdmin);
 router.get('/admin/orders/:id/invoice', requireAuth, requireAdmin, ordersController.downloadInvoice);
+router.get('/admin/orders/:id/spec-sheet', requireAuth, requireAdmin, ordersController.downloadSpecSheet);
 
 module.exports = router;

@@ -67,6 +67,18 @@ const downloadInvoice = asyncHandler(async (req, res) => {
   doc.end();
 });
 
+// Fabrication spec sheet — available for any order, at any status (unlike the
+// invoice, which is gated on 'delivered'): the workshop needs this before the
+// order ships, not after.
+const downloadSpecSheet = asyncHandler(async (req, res) => {
+  const orderId = Number(req.params.id);
+  const doc = await orderService.generateSpecSheet(orderId);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="spec-sheet-${orderId}.pdf"`);
+  doc.pipe(res);
+  doc.end();
+});
+
 module.exports = {
   createOrder,
   listMyOrders,
@@ -77,4 +89,5 @@ module.exports = {
   patchOrderAdmin,
   priceQuoteAdmin,
   downloadInvoice,
+  downloadSpecSheet,
 };

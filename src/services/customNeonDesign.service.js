@@ -204,6 +204,52 @@ function buildNeonSnapshot(row) {
   };
 }
 
+// Turns a design row into the spec an admin (and the fabricator) needs:
+// what to build, at what size, in what colour, and what it should look like.
+// `imageUrl` is signed here because the bucket blocks public access.
+async function describeDesignForAdmin(row) {
+  return {
+    designId: row.id,
+    size: row.size,
+    sizeLabel: isQuoteSize(row.size) ? 'Custom' : capitalize(row.size),
+    dimensions: describeDimensions(row),
+    isQuote: isQuoteSize(row.size),
+    colorLabel: labelNeonColor(row.neon_color),
+    // The bare hex for a customer-picked colour, null for a preset — the
+    // fabricator matches tubing to this, and a preset name is not a colour
+    // value. Kept separate from colorLabel so the UI can show a swatch.
+    colorHex: /^custom:(#[0-9a-f]{6})$/.exec(String(row.neon_color ?? ''))?.[1]?.toUpperCase() ?? null,
+    designType: row.design_type,
+    // Purged images are gone from S3; signing the dead URL would hand the
+    // browser a 404, so report null and let the UI say so.
+    imageUrl: row.images_purged_at ? null : await signImageUrl(row.generated_image_url),
+    imagesPurgedAt: row.images_purged_at,
+  };
+}
+
+// Reads the spec out of an order line's frozen snapshot (buildNeonSnapshot).
+// Preferred over the design row because it is what was actually sold: the
+// design can be regenerated at a different size afterwards, and products can
+// be deleted, but the snapshot never changes.
+function describeSnapshotForAdmin(selectedOptions) {
+  const choices = selectedOptions?.choices;
+  if (!Array.isArray(choices)) return null;
+  const byKey = Object.fromEntries(choices.map((c) => [c.groupKey, c]));
+  // Only a neon snapshot has these; a configurable product's snapshot must
+  // not be mistaken for one.
+  if (!byKey.neon_dimensions && !byKey.neon_color) return null;
+
+  const rawColor = byKey.neon_color?.choiceKey;
+  return {
+    size: byKey.neon_size?.choiceKey ?? null,
+    sizeLabel: byKey.neon_size?.choiceLabel ?? null,
+    dimensions: byKey.neon_dimensions?.choiceLabel ?? null,
+    isQuote: byKey.neon_size?.choiceKey === CUSTOM_SIZE,
+    colorLabel: byKey.neon_color?.choiceLabel ?? null,
+    colorHex: /^custom:(#[0-9a-f]{6})$/.exec(String(rawColor ?? ''))?.[1]?.toUpperCase() ?? null,
+  };
+}
+
 function capitalize(value) {
   const text = String(value ?? '');
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -676,6 +722,8 @@ module.exports = {
   describeColorForCustomer,
   labelNeonColor,
   buildNeonSnapshot,
+  describeDesignForAdmin,
+  describeSnapshotForAdmin,
   createDesign,
   getDesign,
   getActiveDesign,

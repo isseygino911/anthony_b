@@ -16,6 +16,7 @@ const orderService = require('../src/services/order.service');
 const paymentService = require('../src/services/payment.service');
 
 const TABLES = [
+  'users',
   'contact_submissions',
   'customer_notifications',
   'notifications',
@@ -403,5 +404,144 @@ describe('order lines carry the neon size, dimensions and colour', () => {
     const line = await db('order_items').where({ order_id: order.id, item_type: 'line' }).first();
     expect(line.label).toBe('Wall sign');
     expect(line.selected_options).toBeNull();
+  });
+});
+
+// The admin order page has to show what is actually being built. Two sources:
+// the line's own frozen snapshot, or — for orders placed before snapshots
+// existed — the linked design row.
+describe('getOrderAdmin — design specs on order lines', () => {
+  const neonService = require('../src/services/customNeonDesign.service');
+  const cartService = require('../src/services/cart.service');
+  const identity = { user: { id: 30 }, anonSessionId: null };
+
+  async function seedDesignRow(overrides = {}) {
+    const now = new Date();
+    const [id] = await db('custom_neon_designs').insert({
+      user_id: 30,
+      design_type: 'upload',
+      input_payload: JSON.stringify({ sourceImageUrl: 'https://example.test/a.png' }),
+      size: 'small',
+      neon_color: 'white',
+      status: 'ready',
+      attempts: 0,
+      created_at: now,
+      updated_at: now,
+      ...overrides,
+    });
+    return id;
+  }
+
+  it('reads the spec from the line snapshot when there is one', async () => {
+    const [productId] = await db('products').insert({
+      category_id: 1, name: 'Custom Neon Design #44', price: 10, stock_quantity: 9999,
+    });
+    await cartService.addItem(identity, productId, 1, null, neonService.buildNeonSnapshot({
+      size: 'custom', neon_color: 'custom:#ff2d95', custom_width_in: 48, custom_height_in: 18,
+    }));
+    const order = await orderService.createOrder(30, { line1: 'x', country: 'US' });
+
+    const admin = await orderService.getOrderAdmin(order.id);
+    const line = admin.items.find((i) => i.item_type === 'line');
+
+    expect(line.design).toMatchObject({
+      dimensions: '48"x18"',
+      colorLabel: '#FF2D95',
+      colorHex: '#FF2D95',
+      isQuote: true,
+      resolvedFrom: 'snapshot',
+    });
+  });
+
+  it('falls back to the linked design row for a pre-snapshot line', async () => {
+    const [productId] = await db('products').insert({
+      category_id: 1, name: 'Custom Neon Design #44', price: 10, stock_quantity: 9999,
+    });
+    await seedDesignRow({ product_id: productId, size: 'large', neon_color: 'ice-blue' });
+    // No snapshot — exactly how lines written before this feature look.
+    await seedCartItem(31, productId, 1);
+    const order = await orderService.createOrder(31, { line1: 'x', country: 'US' });
+
+    const admin = await orderService.getOrderAdmin(order.id);
+    const line = admin.items.find((i) => i.item_type === 'line');
+
+    expect(line.design).toMatchObject({
+      dimensions: '36"x36"',
+      colorLabel: 'Ice Blue',
+      sizeLabel: 'Large',
+      // Flagged so the UI can say these came from the design, not the sale.
+      resolvedFrom: 'design',
+    });
+  });
+
+  it('reports no image once the design’s images have been purged', async () => {
+    const [productId] = await db('products').insert({
+      category_id: 1, name: 'Custom Neon Design #45', price: 10, stock_quantity: 9999,
+    });
+    await seedDesignRow({
+      product_id: productId,
+      generated_image_url: 'https://example.test/gone.png',
+      images_purged_at: new Date(),
+    });
+    await seedCartItem(32, productId, 1);
+    const order = await orderService.createOrder(32, { line1: 'x', country: 'US' });
+
+    const admin = await orderService.getOrderAdmin(order.id);
+    const line = admin.items.find((i) => i.item_type === 'line');
+
+    // A signed URL for a deleted object would just 404 in the browser.
+    expect(line.design.imageUrl).toBeNull();
+    expect(line.design.imagesPurgedAt).toBeTruthy();
+  });
+
+  it('leaves a plain product line with no design block', async () => {
+    const productId = await seedProduct({ name: 'Wall sign', price: 40, stock_quantity: 10 });
+    await seedCartItem(33, productId, 1);
+    const order = await orderService.createOrder(33, { line1: 'x', country: 'US' });
+
+    const admin = await orderService.getOrderAdmin(order.id);
+    const line = admin.items.find((i) => i.item_type === 'line');
+
+    expect(line.design).toBeUndefined();
+  });
+});
+
+// The spec sheet is what the workshop builds from, so it must render for any
+// order at any status — including plain-product orders with no design at all.
+describe('generateSpecSheet', () => {
+  async function pdfOf(doc) {
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    const done = new Promise((resolve) => doc.on('end', resolve));
+    doc.end();
+    await done;
+    return Buffer.concat(chunks);
+  }
+
+  it('renders a valid PDF for a plain-product order with no design block', async () => {
+    const productId = await seedProduct({ name: 'Wall sign', price: 40, stock_quantity: 10 });
+    await seedCartItem(40, productId, 2);
+    const order = await orderService.createOrder(40, {
+      recipient_name: 'A', line1: 'x', city: 'C', region: 'R', postal_code: '1', country: 'US',
+    });
+
+    const pdf = await pdfOf(await orderService.generateSpecSheet(order.id));
+
+    expect(pdf.slice(0, 4).toString()).toBe('%PDF');
+  });
+
+  it('renders for an unpriced quote order — the workshop needs it before payment', async () => {
+    const productId = await seedQuoteProduct();
+    await seedCartItem(41, productId, 1);
+    const order = await orderService.createOrder(41, { line1: 'x', country: 'US' }, CONTACT);
+
+    // Deliberately not gated on status the way the invoice is.
+    const pdf = await pdfOf(await orderService.generateSpecSheet(order.id));
+
+    expect(pdf.slice(0, 4).toString()).toBe('%PDF');
+  });
+
+  it('404s for an order that does not exist', async () => {
+    await expect(orderService.generateSpecSheet(999999)).rejects.toThrow('Order not found');
   });
 });

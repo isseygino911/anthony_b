@@ -12,6 +12,9 @@ const { getStripeClient } = require('../config/stripe');
 const ApiError = require('../utils/apiError');
 const contactService = require('./contact.service');
 const customerNotificationModel = require('../models/customerNotification.model');
+const customNeonDesignModel = require('../models/customNeonDesign.model');
+const customNeonDesignService = require('./customNeonDesign.service');
+const uploadService = require('./upload.service');
 
 const ADJUSTMENT_LABELS = {
   discount: 'Manual discount',
@@ -67,6 +70,12 @@ async function shapeOrder(orderId, trx = db) {
       unit_price: item.unit_price !== null ? Number(item.unit_price) : null,
       quantity: item.quantity,
       amount: item.amount !== null ? Number(item.amount) : null,
+      // The frozen size/colour snapshot (buildNeonSnapshot). Parsed here so
+      // every consumer gets an object rather than a JSON string.
+      selected_options:
+        typeof item.selected_options === 'string'
+          ? JSON.parse(item.selected_options)
+          : (item.selected_options ?? null),
     })),
   };
 }
@@ -304,12 +313,57 @@ async function listOrdersAdmin(filters, { page, pageSize }) {
   };
 }
 
+// Attaches the neon design spec to each line so the admin order page can show
+// what is actually being built — dimensions, colour and the preview image —
+// rather than just "Custom Neon Design #44".
+//
+// Two sources, in priority order:
+//  1. The line's own selected_options snapshot. Authoritative, because it is
+//     what was sold: the design may have been regenerated at another size
+//     since, and the product may be gone entirely.
+//  2. The linked design row, for lines predating that snapshot (13 of them at
+//     the time of writing). Recoverable only while product_id survives —
+//     it is ON DELETE SET NULL — which is exactly why (1) exists.
+//
+// The design row is also what supplies the preview image in both cases; a
+// snapshot deliberately stores no URL, since S3 objects are purged on their
+// own schedule and a frozen link would rot.
+async function attachDesignSpecs(items) {
+  const productIds = [...new Set(items.filter((i) => i.product_id).map((i) => i.product_id))];
+  const designs = await customNeonDesignModel.findByProductIds(productIds);
+  const byProductId = new Map(designs.map((d) => [d.product_id, d]));
+
+  return Promise.all(
+    items.map(async (item) => {
+      const design = item.product_id ? byProductId.get(item.product_id) : null;
+      const fromSnapshot = customNeonDesignService.describeSnapshotForAdmin(item.selected_options);
+      if (!design && !fromSnapshot) return item;
+
+      const fromDesign = design ? await customNeonDesignService.describeDesignForAdmin(design) : null;
+      return {
+        ...item,
+        design: {
+          ...fromDesign,
+          // Snapshot values win where present; the design row fills the gaps
+          // (the image, and everything for a pre-snapshot line).
+          ...(fromSnapshot ?? {}),
+          imageUrl: fromDesign?.imageUrl ?? null,
+          designId: fromDesign?.designId ?? null,
+          // Tells the UI (and a future backfill) that this line is relying on
+          // the fallback rather than on its own frozen snapshot.
+          resolvedFrom: fromSnapshot ? 'snapshot' : 'design',
+        },
+      };
+    })
+  );
+}
+
 async function getOrderAdmin(orderId) {
   const order = await orderModel.findById(orderId);
   if (!order) throw ApiError.notFound('Order not found');
   const shaped = await shapeOrder(orderId);
   const auditLog = await orderAuditLogModel.listByOrderId(orderId);
-  return { ...shaped, auditLog };
+  return { ...shaped, items: await attachDesignSpecs(shaped.items), auditLog };
 }
 
 // Admin-triggered full refund: issues the actual Stripe refund against the
@@ -488,6 +542,138 @@ async function priceQuote(orderId, prices, actorUserId) {
   });
 }
 
+// Fabrication spec sheet: what the workshop needs in order to actually build
+// an order, which the invoice deliberately does not carry (that is a financial
+// document). One page per line item, the design preview printed large enough
+// to work from, with the dimensions and colour beside it.
+//
+// Available for every order, including plain-product ones — those pages simply
+// list the product and quantity with no design block. Unlike generateInvoice
+// there is no status gate: the workshop needs this *before* the order ships,
+// which is the whole point.
+//
+// Returns the PDFDocument without ending it, same contract as
+// generateInvoice — the controller owns piping and .end().
+async function generateSpecSheet(orderId) {
+  const order = await orderModel.findById(orderId);
+  if (!order) throw ApiError.notFound('Order not found');
+
+  const [shaped, customer, theme] = await Promise.all([
+    getOrderAdmin(orderId),
+    userModel.findById(order.user_id),
+    siteThemeModel.getRow(),
+  ]);
+
+  // Only real line items get a page; adjustments are financial, not physical.
+  const lines = shaped.items.filter((item) => item.item_type === 'line');
+  const brandName = theme?.brand_name || 'Spec Sheet';
+
+  // Images are fetched up front: pdfkit's doc.image() is synchronous, so the
+  // buffers have to exist before any page is written.
+  const images = new Map();
+  // eslint-disable-next-line no-restricted-syntax
+  for (const line of lines) {
+    if (!line.design?.designId || line.design.imagesPurgedAt) continue;
+    const design = await customNeonDesignModel.findById(line.design.designId);
+    if (!design?.generated_image_url) continue;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const { buffer } = await uploadService.getObjectBuffer(design.generated_image_url);
+      images.set(line.id, buffer);
+    } catch (err) {
+      // A missing or unreadable S3 object must not fail the whole sheet —
+      // the specs below are the part the workshop cannot work without.
+      console.error(`[spec-sheet] image fetch failed for design ${line.design.designId}:`, err.message);
+    }
+  }
+
+  const doc = new PDFDocument({ margin: 50 });
+
+  lines.forEach((line, index) => {
+    if (index > 0) doc.addPage();
+
+    doc.fontSize(18).font('Helvetica-Bold').text(brandName);
+    doc.fontSize(14).font('Helvetica').text(`Fabrication spec sheet — Order #${order.id}`);
+    doc.fontSize(9).fillColor('#666')
+      .text(`Item ${index + 1} of ${lines.length}  ·  Generated ${new Date().toISOString().slice(0, 10)}`);
+    doc.fillColor('#000');
+    doc.moveDown(0.8);
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown(0.8);
+
+    doc.fontSize(15).font('Helvetica-Bold').text(line.label);
+    doc.moveDown(0.5);
+
+    const image = images.get(line.id);
+    if (image) {
+      // fit rather than fixed width so tall/wide custom shapes keep their
+      // proportions — the aspect ratio is part of the spec.
+      doc.image(image, { fit: [320, 240], align: 'center' });
+      doc.moveDown(0.8);
+    } else if (line.design) {
+      doc.fontSize(10).font('Helvetica-Oblique').fillColor('#999')
+        .text(line.design.imagesPurgedAt ? '[preview image purged]' : '[preview image unavailable]');
+      doc.fillColor('#000');
+      doc.moveDown(0.8);
+    }
+
+    const spec = [['Quantity', String(line.quantity ?? 1)]];
+    if (line.design) {
+      spec.push(['Design', `#${line.design.designId ?? '—'}`]);
+      if (line.design.designType) spec.push(['Source', capitalizeWord(line.design.designType)]);
+      spec.push(['Size', line.design.sizeLabel ?? '—']);
+      spec.push(['Dimensions', line.design.dimensions ?? '—']);
+      spec.push([
+        'Colour',
+        // For a customer-picked colour the label IS the hex, so printing both
+        // reads as "#00FFD5 (#00FFD5)". Only pair them when the label is a
+        // preset name that the hex would otherwise not identify.
+        line.design.colorHex && line.design.colorLabel !== line.design.colorHex
+          ? `${line.design.colorLabel} (${line.design.colorHex})`
+          : (line.design.colorLabel ?? line.design.colorHex ?? '—'),
+      ]);
+      if (line.design.isQuote) spec.push(['Pricing', 'Custom size — quoted by hand']);
+    }
+
+    doc.fontSize(11).font('Helvetica');
+    spec.forEach(([label, value]) => {
+      const y = doc.y;
+      doc.font('Helvetica-Bold').text(label, 50, y, { width: 120 });
+      doc.font('Helvetica').text(value, 175, y, { width: 375 });
+      doc.moveDown(0.35);
+    });
+
+    doc.moveDown(0.8);
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown(0.6);
+
+    doc.fontSize(11).font('Helvetica-Bold').text('Ship to');
+    doc.font('Helvetica').fontSize(10);
+    const address = shaped.shipping_address || {};
+    [
+      address.recipient_name,
+      customer?.email,
+      address.line1,
+      address.line2,
+      [address.city, address.region, address.postal_code].filter(Boolean).join(', '),
+      address.country,
+    ]
+      .filter(Boolean)
+      .forEach((part) => doc.text(part));
+  });
+
+  if (!lines.length) {
+    doc.fontSize(14).text(`Order #${order.id} has no line items.`);
+  }
+
+  return doc;
+}
+
+function capitalizeWord(value) {
+  const text = String(value ?? '');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function formatMoney(amount) {
   return `$${Number(amount).toFixed(2)}`;
 }
@@ -615,4 +801,5 @@ module.exports = {
   applyAdjustment,
   priceQuote,
   generateInvoice,
+  generateSpecSheet,
 };

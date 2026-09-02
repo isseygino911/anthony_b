@@ -23,6 +23,7 @@ const stripe = isolateStripe(vi); // ditto
 const orderService = require('../src/services/order.service');
 
 const TABLES = [
+  'users',
   'contact_submissions',
   'customer_notifications',
   'notifications',
